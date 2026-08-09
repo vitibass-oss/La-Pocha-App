@@ -1,0 +1,10 @@
+{
+  "name": "La Podrida",
+  "description": "Contador de puntos, estadísticas de fallos y análisis para el juego de cartas La Pocha para 4 a 8 jugadores con entrada de voz y reglas de Oros.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
