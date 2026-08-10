@@ -15,6 +15,8 @@ import { StatisticsModal } from './components/StatisticsModal';
 import { RulesModal } from './components/RulesModal';
 import { GameSummaryModal } from './components/GameSummaryModal';
 import { DownloadAppModal } from './components/DownloadAppModal';
+import { AddPlayerModal } from './components/AddPlayerModal';
+import { EditRoundModal } from './components/EditRoundModal';
 import { Trophy, Play, BarChart3, RotateCcw, AlertTriangle } from 'lucide-react';
 
 const STORAGE_KEY = 'pocha_game_v2';
@@ -24,10 +26,26 @@ export default function App() {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (
+          parsed &&
+          Array.isArray(parsed.players) &&
+          parsed.players.length > 0 &&
+          Array.isArray(parsed.rounds) &&
+          parsed.rounds.length > 0
+        ) {
+          parsed.currentRoundIndex = Math.max(
+            0,
+            Math.min(parsed.rounds.length - 1, parsed.currentRoundIndex || 0)
+          );
+          return parsed;
+        }
       }
     } catch (e) {
       console.error('Failed to load saved game:', e);
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+      } catch (err) {}
     }
     return null;
   });
@@ -39,6 +57,9 @@ export default function App() {
   const [showRulesModal, setShowRulesModal] = useState(false);
   const [showSummaryModal, setShowSummaryModal] = useState(false);
   const [showDownloadModal, setShowDownloadModal] = useState(false);
+  const [showAddPlayerModal, setShowAddPlayerModal] = useState(false);
+  const [showEditRoundModal, setShowEditRoundModal] = useState(false);
+  const [editRoundIndex, setEditRoundIndex] = useState(0);
   const [showNewGameConfirmModal, setShowNewGameConfirmModal] = useState(false);
   const [showResetRoundConfirmModal, setShowResetRoundConfirmModal] = useState(false);
 
@@ -208,6 +229,57 @@ export default function App() {
     setGame({ ...game, rounds: recalculated });
   };
 
+  // Add new player mid-game
+  const handleAddPlayer = (newPlayer: Player) => {
+    if (!game) return;
+    const updatedPlayers = [...game.players, newPlayer];
+    const recalculated = recalculateGameScores(updatedPlayers, game.rounds, game.rules);
+
+    setGame({
+      ...game,
+      players: updatedPlayers,
+      rounds: recalculated,
+      updatedAt: new Date().toISOString(),
+    });
+  };
+
+  // Bulk save round scores from EditRoundModal
+  const handleSaveBulkRoundScore = (
+    roundIndex: number,
+    updatedScoresMap: Record<string, { bid: number; actual: number }>
+  ) => {
+    if (!game) return;
+    const updatedRounds = [...game.rounds];
+    const targetRound = { ...updatedRounds[roundIndex] };
+
+    const newScores = { ...targetRound.scores };
+    game.players.forEach((p) => {
+      const entry = updatedScoresMap[p.id];
+      if (entry) {
+        newScores[p.id] = {
+          ...(newScores[p.id] || {
+            playerId: p.id,
+            bid: null,
+            actual: null,
+            points: 0,
+            accumulatedPoints: 0,
+            hit: null,
+            difference: 0,
+          }),
+          bid: entry.bid,
+          actual: entry.actual,
+        };
+      }
+    });
+
+    targetRound.scores = newScores;
+    targetRound.phase = 'completed';
+    updatedRounds[roundIndex] = targetRound;
+
+    const recalculated = recalculateGameScores(game.players, updatedRounds, game.rules);
+    setGame({ ...game, rounds: recalculated });
+  };
+
   // Confirm Reset Current Round
   const executeResetCurrentRound = () => {
     if (!game) return;
@@ -286,13 +358,22 @@ export default function App() {
                     onUpdateActuals={handleUpdateActuals}
                     onChangeTrump={handleChangeTrump}
                     onOpenVoiceModal={handleOpenVoiceModal}
+                    onOpenAddPlayerModal={() => setShowAddPlayerModal(true)}
+                    onOpenEditRoundModal={() => {
+                      setEditRoundIndex(game.currentRoundIndex);
+                      setShowEditRoundModal(true);
+                    }}
                   />
                 )}
               </div>
 
               {/* Right Column (1 col): Live Standings Leaderboard */}
               <div className="space-y-6">
-                <Leaderboard stats={stats} currentRound={currentRound || undefined} />
+                <Leaderboard
+                  stats={stats}
+                  currentRound={currentRound || undefined}
+                  onOpenAddPlayerModal={() => setShowAddPlayerModal(true)}
+                />
 
                 {/* Quick Finish Match Button */}
                 <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl flex items-center justify-between">
@@ -320,6 +401,10 @@ export default function App() {
                 onEditRoundScore={handleEditRoundScore}
                 onSelectRoundIndex={(rIdx) => {
                   setGame({ ...game, currentRoundIndex: rIdx });
+                }}
+                onOpenEditRoundModal={() => {
+                  setEditRoundIndex(game.currentRoundIndex);
+                  setShowEditRoundModal(true);
                 }}
               />
             </div>
@@ -363,6 +448,29 @@ export default function App() {
       <RulesModal isOpen={showRulesModal} onClose={() => setShowRulesModal(false)} />
 
       <DownloadAppModal isOpen={showDownloadModal} onClose={() => setShowDownloadModal(false)} />
+
+      {game && (
+        <AddPlayerModal
+          isOpen={showAddPlayerModal}
+          onClose={() => setShowAddPlayerModal(false)}
+          existingPlayers={game.players}
+          stats={stats}
+          currentRoundIndex={game.currentRoundIndex}
+          onAddPlayer={handleAddPlayer}
+        />
+      )}
+
+      {game && (
+        <EditRoundModal
+          isOpen={showEditRoundModal}
+          onClose={() => setShowEditRoundModal(false)}
+          rounds={game.rounds}
+          players={game.players}
+          rules={game.rules}
+          initialRoundIndex={editRoundIndex}
+          onSaveRoundScore={handleSaveBulkRoundScore}
+        />
+      )}
 
       {game && (
         <GameSummaryModal

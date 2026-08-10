@@ -5,9 +5,14 @@ import { Trophy, TrendingUp, Award, Flame, CheckCircle2, XCircle } from 'lucide-
 interface LeaderboardProps {
   stats: PlayerStats[];
   currentRound?: Round;
+  onOpenAddPlayerModal?: () => void;
 }
 
-export const Leaderboard: React.FC<LeaderboardProps> = ({ stats, currentRound }) => {
+export const Leaderboard: React.FC<LeaderboardProps> = ({
+  stats,
+  currentRound,
+  onOpenAddPlayerModal,
+}) => {
   const rankMedals = ['🥇', '🥈', '🥉'];
 
   return (
@@ -18,9 +23,20 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ stats, currentRound })
           <Trophy className="w-5 h-5 text-amber-400" />
           <h3 className="font-extrabold text-white text-base">Clasificación en Directo</h3>
         </div>
-        <span className="text-xs text-slate-400 font-medium">
-          {stats.length} Jugadores
-        </span>
+        <div className="flex items-center space-x-2">
+          {onOpenAddPlayerModal && (
+            <button
+              onClick={onOpenAddPlayerModal}
+              className="text-xs bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold px-2.5 py-1 rounded-lg transition cursor-pointer flex items-center space-x-1"
+              title="Añadir un jugador a mitad de partida"
+            >
+              <span>➕ Añadir Jugador</span>
+            </button>
+          )}
+          <span className="text-xs text-slate-400 font-medium">
+            {stats.length} Jugadores
+          </span>
+        </div>
       </div>
 
       {/* Leaderboard Cards List */}

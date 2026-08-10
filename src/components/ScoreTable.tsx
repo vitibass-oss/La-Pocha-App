@@ -9,6 +9,7 @@ interface ScoreTableProps {
   currentRoundIndex: number;
   onEditRoundScore: (roundIndex: number, playerId: string, bid: number, actual: number) => void;
   onSelectRoundIndex: (roundIndex: number) => void;
+  onOpenEditRoundModal?: () => void;
 }
 
 export const ScoreTable: React.FC<ScoreTableProps> = ({
@@ -17,6 +18,7 @@ export const ScoreTable: React.FC<ScoreTableProps> = ({
   currentRoundIndex,
   onEditRoundScore,
   onSelectRoundIndex,
+  onOpenEditRoundModal,
 }) => {
   const [editingCell, setEditingCell] = useState<{
     roundIndex: number;
@@ -54,9 +56,21 @@ export const ScoreTable: React.FC<ScoreTableProps> = ({
           <Table className="w-5 h-5 text-amber-400" />
           <h3 className="font-extrabold text-white text-base">Tabla General de Puntuaciones</h3>
         </div>
-        <span className="text-xs text-slate-400 font-medium">
-          Toca cualquier celda completada para corregir
-        </span>
+        <div className="flex items-center space-x-3">
+          {onOpenEditRoundModal && (
+            <button
+              onClick={onOpenEditRoundModal}
+              className="text-xs bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 font-bold px-2.5 py-1 rounded-lg transition cursor-pointer flex items-center space-x-1"
+              title="Abrir editor completo para corregir puntuaciones de cualquier ronda"
+            >
+              <Edit2 className="w-3.5 h-3.5 text-amber-400" />
+              <span>Corregir Ronda</span>
+            </button>
+          )}
+          <span className="text-xs text-slate-400 font-medium hidden sm:inline">
+            Toca cualquier celda o botón para corregir
+          </span>
+        </div>
       </div>
 
       {/* Overflow Table Container */}

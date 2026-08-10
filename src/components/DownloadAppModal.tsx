@@ -153,7 +153,7 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({ isOpen, onCl
               Si deseas generar instaladores <code className="bg-slate-800 px-1 py-0.5 rounded text-amber-300">.exe</code> para Windows, <code className="bg-slate-800 px-1 py-0.5 rounded text-purple-300">.dmg</code> para macOS Monterey o <code className="bg-slate-800 px-1 py-0.5 rounded text-emerald-300">.apk</code> para Android:
             </p>
             <div className="bg-slate-900 p-3 rounded-lg border border-slate-800 text-xs text-slate-300 space-y-1.5 font-mono">
-              <p>1. Haz clic en el menú superior derecho &gt; <strong>Export Project</strong> (o GitHub) para descargar los archivos.</p>
+              <p>1. Ve al menú de AI Studio &gt; pestaña <strong>Share</strong> (para publicar o copiar enlace) o pestaña <strong>Git Hub</strong> para descargar o sincronizar el código fuente.</p>
               <p>2. Abre la terminal en tu ordenador y ejecuta: <span className="text-amber-300">npm install &amp;&amp; npm run build</span></p>
               <p>3. Para crear <strong>.exe</strong> o <strong>.dmg</strong> con Electron/Nativefier: <span className="text-emerald-400">npx nativefier --name "LaPocha" dist/</span></p>
               <p>4. O abre el archivo estático <span className="text-cyan-300">dist/index.html</span> directamente en cualquier navegador de forma 100% offline.</p>

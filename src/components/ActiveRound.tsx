@@ -14,6 +14,8 @@ interface ActiveRoundProps {
   onUpdateActuals: (scores: Record<string, number>) => void;
   onChangeTrump: (trump: Suit) => void;
   onOpenVoiceModal: (mode: 'bids' | 'actuals') => void;
+  onOpenAddPlayerModal?: () => void;
+  onOpenEditRoundModal?: () => void;
 }
 
 export const ActiveRound: React.FC<ActiveRoundProps> = ({
@@ -25,6 +27,8 @@ export const ActiveRound: React.FC<ActiveRoundProps> = ({
   onUpdateActuals,
   onChangeTrump,
   onOpenVoiceModal,
+  onOpenAddPlayerModal,
+  onOpenEditRoundModal,
 }) => {
   const cards = round.cards;
   const dealer = players[round.dealerIndex] || players[0];
@@ -184,6 +188,29 @@ export const ActiveRound: React.FC<ActiveRoundProps> = ({
                   {round.isVisibleTrumpMax && '👁️ '}
                   {round.phaseName}
                 </span>
+              )}
+
+              {/* Quick Modals Triggers */}
+              {onOpenEditRoundModal && (
+                <button
+                  type="button"
+                  onClick={onOpenEditRoundModal}
+                  className="text-xs font-bold bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 px-2.5 py-1 rounded-md transition flex items-center space-x-1 cursor-pointer"
+                  title="Corregir un error en la puntuación de esta u otra ronda"
+                >
+                  <span>✏️ Corregir Ronda</span>
+                </button>
+              )}
+
+              {onOpenAddPlayerModal && (
+                <button
+                  type="button"
+                  onClick={onOpenAddPlayerModal}
+                  className="text-xs font-bold bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 px-2.5 py-1 rounded-md transition flex items-center space-x-1 cursor-pointer"
+                  title="Añadir un nuevo jugador a mitad de partida"
+                >
+                  <span>➕ Unir Jugador</span>
+                </button>
               )}
             </div>
 

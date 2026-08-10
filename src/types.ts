@@ -16,6 +16,8 @@ export interface Player {
   name: string;
   color: string;
   avatar: string;
+  startingPoints?: number;       // Score offset when joining mid-game (starts with fewest points)
+  joinedAtRoundIndex?: number;   // Round index when the player joined mid-game
 }
 
 export interface RoundScore {

@@ -340,16 +340,20 @@ export function recalculateGameScores(
 ): Round[] {
   const accumulatedMap: Record<string, number> = {};
   players.forEach((p) => {
-    accumulatedMap[p.id] = 0;
+    accumulatedMap[p.id] = p.startingPoints || 0;
   });
 
-  return rounds.map((round) => {
+  return rounds.map((round, rIdx) => {
     const updatedScores: Record<string, RoundScore> = {};
 
     players.forEach((player) => {
+      // If player joined mid-game after this round, they didn't participate in this round
+      const joinedIdx = player.joinedAtRoundIndex;
+      const joinedAfterThisRound = joinedIdx !== undefined && rIdx < joinedIdx;
+
       const currentScore = round.scores[player.id];
-      const bid = currentScore?.bid ?? null;
-      const actual = currentScore?.actual ?? null;
+      const bid = joinedAfterThisRound ? null : (currentScore?.bid ?? null);
+      const actual = joinedAfterThisRound ? null : (currentScore?.actual ?? null);
 
       let points = 0;
       let hit: boolean | null = null;
@@ -364,7 +368,7 @@ export function recalculateGameScores(
         isPocha = result.isPocha;
       }
 
-      const prevAccumulated = accumulatedMap[player.id] || 0;
+      const prevAccumulated = accumulatedMap[player.id] ?? (player.startingPoints || 0);
       const newAccumulated = round.phase === 'completed' ? prevAccumulated + points : prevAccumulated;
 
       if (round.phase === 'completed') {
@@ -396,10 +400,13 @@ export function recalculateGameScores(
 export function getBiddingOrder(players: Player[], dealerIndex: number): Player[] {
   const n = players.length;
   if (n === 0) return [];
+  const safeDealerIndex = ((dealerIndex % n) + n) % n;
   const order: Player[] = [];
   for (let i = 1; i <= n; i++) {
-    const idx = (dealerIndex + i) % n;
-    order.push(players[idx]);
+    const idx = (safeDealerIndex + i) % n;
+    if (players[idx]) {
+      order.push(players[idx]);
+    }
   }
   return order;
 }
@@ -413,17 +420,20 @@ export function getForbiddenDealerBid(
   round: Round,
   rules: GameRules
 ): number | null {
-  if (!rules.forbiddenDealerBid) return null;
+  if (!rules.forbiddenDealerBid || players.length === 0) return null;
 
   const cards = round.cards;
-  const biddingOrder = getBiddingOrder(players, dealerIndex);
-  const dealer = players[dealerIndex];
+  const safeDealerIndex = ((dealerIndex % players.length) + players.length) % players.length;
+  const dealer = players[safeDealerIndex];
+  if (!dealer) return null;
+
+  const biddingOrder = getBiddingOrder(players, safeDealerIndex);
 
   let sumOthers = 0;
   let otherBidsCount = 0;
 
   biddingOrder.forEach((p) => {
-    if (p.id !== dealer.id) {
+    if (p && p.id !== dealer.id) {
       const b = round.scores[p.id]?.bid;
       if (b !== undefined && b !== null) {
         sumOthers += b;

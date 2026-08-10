@@ -1,0 +1,305 @@
+import React, { useState, useEffect } from 'react';
+import { Player, Round, GameRules } from '../types';
+import { SUITS } from '../utils/pocha';
+import { Edit3, Check, X, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
+
+interface EditRoundModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  rounds: Round[];
+  players: Player[];
+  rules: GameRules;
+  initialRoundIndex?: number;
+  onSaveRoundScore: (
+    roundIndex: number,
+    updatedScores: Record<string, { bid: number; actual: number }>
+  ) => void;
+}
+
+export const EditRoundModal: React.FC<EditRoundModalProps> = ({
+  isOpen,
+  onClose,
+  rounds,
+  players,
+  rules,
+  initialRoundIndex = 0,
+  onSaveRoundScore,
+}) => {
+  const [selectedRoundIdx, setSelectedRoundIdx] = useState(initialRoundIndex);
+  const [localScores, setLocalScores] = useState<
+    Record<string, { bid: number; actual: number }>
+  >({});
+
+  useEffect(() => {
+    if (isOpen) {
+      setSelectedRoundIdx(Math.min(initialRoundIndex, rounds.length - 1));
+    }
+  }, [isOpen, initialRoundIndex, rounds.length]);
+
+  const currentRound = rounds[selectedRoundIdx];
+
+  useEffect(() => {
+    if (currentRound) {
+      const initialMap: Record<string, { bid: number; actual: number }> = {};
+      players.forEach((p) => {
+        const s = currentRound.scores[p.id];
+        initialMap[p.id] = {
+          bid: s?.bid !== null && s?.bid !== undefined ? s.bid : 0,
+          actual: s?.actual !== null && s?.actual !== undefined ? s.actual : 0,
+        };
+      });
+      setLocalScores(initialMap);
+    }
+  }, [currentRound, players]);
+
+  if (!isOpen || !currentRound) return null;
+
+  const suit = SUITS[currentRound.trump];
+  const dealer = players[currentRound.dealerIndex] || players[0];
+
+  // Calculate sum of actual tricks
+  const totalActuals = Object.values(localScores).reduce((acc: number, curr: { bid: number; actual: number }) => acc + (curr.actual || 0), 0);
+  const tricksMatch = totalActuals === currentRound.cards;
+
+  const handleBidChange = (playerId: string, delta: number) => {
+    setLocalScores((prev) => {
+      const current = prev[playerId] || { bid: 0, actual: 0 };
+      const nextBid = Math.max(0, Math.min(currentRound.cards, current.bid + delta));
+      return { ...prev, [playerId]: { ...current, bid: nextBid } };
+    });
+  };
+
+  const handleActualChange = (playerId: string, delta: number) => {
+    setLocalScores((prev) => {
+      const current = prev[playerId] || { bid: 0, actual: 0 };
+      const nextActual = Math.max(0, Math.min(currentRound.cards, current.actual + delta));
+      return { ...prev, [playerId]: { ...current, actual: nextActual } };
+    });
+  };
+
+  const handleSave = () => {
+    onSaveRoundScore(selectedRoundIdx, localScores);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-xl w-full p-6 space-y-6 shadow-2xl animate-in fade-in zoom-in duration-200 max-h-[90vh] overflow-y-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 font-bold">
+              <Edit3 className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-lg font-black text-white">Corregir / Editar Ronda</h3>
+              <p className="text-xs text-slate-400">Modifica bazas pedidas y hechas de cualquier ronda</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Round Selector Header */}
+        <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 flex items-center justify-between gap-2">
+          <button
+            disabled={selectedRoundIdx <= 0}
+            onClick={() => setSelectedRoundIdx((prev) => Math.max(0, prev - 1))}
+            className="p-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-30 rounded-lg text-white font-bold transition cursor-pointer"
+          >
+            <ChevronLeft className="w-5 h-5" />
+          </button>
+
+          <div className="text-center">
+            <span className="text-xs text-slate-400 uppercase font-extrabold tracking-wider block">
+              Seleccionar Ronda
+            </span>
+            <div className="flex items-center justify-center space-x-2 mt-0.5">
+              <span className="text-lg font-black text-amber-300">
+                Ronda {currentRound.roundNumber} de {rounds.length}
+              </span>
+              <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-bold">
+                {currentRound.cards} {currentRound.cards === 1 ? 'carta' : 'cartas'}
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 mt-1">
+              Repartió: 👑 {dealer.name} • Triunfo: {suit.symbol} {suit.name}
+            </p>
+          </div>
+
+          <button
+            disabled={selectedRoundIdx >= rounds.length - 1}
+            onClick={() => setSelectedRoundIdx((prev) => Math.min(rounds.length - 1, prev + 1))}
+            className="p-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-30 rounded-lg text-white font-bold transition cursor-pointer"
+          >
+            <ChevronRight className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Validation indicator */}
+        <div
+          className={`p-3 rounded-xl border flex items-center justify-between text-xs font-bold ${
+            tricksMatch
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+              : 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+          }`}
+        >
+          <div className="flex items-center space-x-2">
+            {tricksMatch ? (
+              <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            )}
+            <span>
+              Total bazas hechas: {totalActuals} de {currentRound.cards} posibles
+            </span>
+          </div>
+          {!tricksMatch && (
+            <span className="text-[10px] text-amber-300/80 font-normal hidden sm:inline">
+              (Asegúrate de repartir las {currentRound.cards} bazas de la mano)
+            </span>
+          )}
+        </div>
+
+        {/* Players Score Inputs Table */}
+        <div className="space-y-3">
+          {players.map((p) => {
+            const joinedIdx = p.joinedAtRoundIndex;
+            const joinedAfter = joinedIdx !== undefined && selectedRoundIdx < joinedIdx;
+
+            if (joinedAfter) {
+              return (
+                <div
+                  key={p.id}
+                  className="bg-slate-950/40 border border-slate-800/60 rounded-xl p-3 flex items-center justify-between text-xs text-slate-500"
+                >
+                  <div className="flex items-center space-x-2">
+                    <span>{p.avatar}</span>
+                    <span className="font-bold">{p.name}</span>
+                  </div>
+                  <span className="italic">(Aún no se había unido a la partida)</span>
+                </div>
+              );
+            }
+
+            const current = localScores[p.id] || { bid: 0, actual: 0 };
+
+            return (
+              <div
+                key={p.id}
+                className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+              >
+                {/* Player info */}
+                <div className="flex items-center space-x-2.5">
+                  <div
+                    className="w-8 h-8 rounded-lg flex items-center justify-center text-base border border-slate-700"
+                    style={{ backgroundColor: `${p.color}20`, borderColor: p.color }}
+                  >
+                    {p.avatar}
+                  </div>
+                  <span className="font-extrabold text-white text-sm">{p.name}</span>
+                </div>
+
+                {/* Score Controls */}
+                <div className="flex items-center justify-between sm:justify-end gap-4">
+                  {/* Pedidas */}
+                  <div className="flex items-center space-x-1.5 bg-slate-900 px-2.5 py-1.5 rounded-lg border border-slate-800">
+                    <span className="text-[10px] font-bold uppercase text-amber-400/80 mr-1">
+                      Pedidas:
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleBidChange(p.id, -1)}
+                      className="w-7 h-7 rounded bg-slate-800 hover:bg-slate-700 font-black text-white text-sm transition"
+                    >
+                      -
+                    </button>
+                    <input
+                      type="number"
+                      min={0}
+                      max={currentRound.cards}
+                      value={current.bid}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10) || 0;
+                        setLocalScores((prev) => ({
+                          ...prev,
+                          [p.id]: { ...prev[p.id], bid: Math.max(0, Math.min(currentRound.cards, val)) },
+                        }));
+                      }}
+                      className="w-8 bg-transparent text-center font-black text-amber-300 text-sm focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleBidChange(p.id, 1)}
+                      className="w-7 h-7 rounded bg-slate-800 hover:bg-slate-700 font-black text-white text-sm transition"
+                    >
+                      +
+                    </button>
+                  </div>
+
+                  {/* Hechas */}
+                  <div className="flex items-center space-x-1.5 bg-slate-900 px-2.5 py-1.5 rounded-lg border border-slate-800">
+                    <span className="text-[10px] font-bold uppercase text-emerald-400/80 mr-1">
+                      Hechas:
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleActualChange(p.id, -1)}
+                      className="w-7 h-7 rounded bg-slate-800 hover:bg-slate-700 font-black text-white text-sm transition"
+                    >
+                      -
+                    </button>
+                    <input
+                      type="number"
+                      min={0}
+                      max={currentRound.cards}
+                      value={current.actual}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10) || 0;
+                        setLocalScores((prev) => ({
+                          ...prev,
+                          [p.id]: { ...prev[p.id], actual: Math.max(0, Math.min(currentRound.cards, val)) },
+                        }));
+                      }}
+                      className="w-8 bg-transparent text-center font-black text-emerald-400 text-sm focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleActualChange(p.id, 1)}
+                      className="w-7 h-7 rounded bg-slate-800 hover:bg-slate-700 font-black text-white text-sm transition"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Action Buttons */}
+        <div className="flex items-center space-x-3 pt-3 border-t border-slate-800">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition text-sm cursor-pointer"
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            className="flex-1 py-3 bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black rounded-xl transition text-sm shadow-lg shadow-amber-500/20 flex items-center justify-center space-x-2 cursor-pointer"
+          >
+            <Check className="w-4 h-4" />
+            <span>Guardar y Recalcular</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
