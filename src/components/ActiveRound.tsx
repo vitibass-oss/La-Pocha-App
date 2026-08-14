@@ -1,8 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { GameRules, Player, Round, Suit } from '../types';
-import { SUITS, getForbiddenDealerBid, getBiddingOrder, getHighestBidder } from '../utils/pocha';
+import { SUITS, getForbiddenDealerBid, getBiddingOrder, getHighestBidder, calculateScore } from '../utils/pocha';
+import { soundManager } from '../utils/audio';
 import { CardDrawModal } from './CardDrawModal';
-import { Mic, MessageSquare, CheckCircle, AlertCircle, ArrowRight, ShieldAlert, Sparkles, RefreshCw, Flame, Crown, Shuffle } from 'lucide-react';
+import {
+  Mic,
+  MessageSquare,
+  CheckCircle,
+  AlertCircle,
+  ArrowRight,
+  ShieldAlert,
+  Sparkles,
+  RefreshCw,
+  Flame,
+  Crown,
+  Shuffle,
+  Volume2,
+  VolumeX,
+} from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 interface ActiveRoundProps {
@@ -38,6 +53,12 @@ export const ActiveRound: React.FC<ActiveRoundProps> = ({
   const [bids, setBids] = useState<Record<string, number>>({});
   const [actuals, setActuals] = useState<Record<string, number>>({});
   const [showCardDrawModal, setShowCardDrawModal] = useState(false);
+  const [soundActive, setSoundActive] = useState<boolean>(() => soundManager.isEnabled());
+
+  const handleToggleSound = () => {
+    const next = soundManager.toggle();
+    setSoundActive(next);
+  };
 
   // Sync state when round or phase changes
   useEffect(() => {
@@ -95,18 +116,30 @@ export const ActiveRound: React.FC<ActiveRoundProps> = ({
     ),
   });
 
-  // Adjust bid for a player
+  // Adjust bid for a player with intelligent skip over forbidden dealer bid
   const handleBidChange = (playerId: string, delta: number) => {
     const current = bids[playerId] ?? 0;
-    const nextVal = Math.max(0, Math.min(cards, current + delta));
+    const isDealer = playerId === dealer.id;
+    let nextVal = current + delta;
 
-    // If it's the dealer and it matches forbidden dealer bid
-    if (playerId === dealer.id && rules.forbiddenDealerBid && nextVal === forbiddenDealerBid) {
-      // Don't allow setting forbidden bid if user clicks button
-      return;
+    if (isDealer && rules.forbiddenDealerBid && forbiddenDealerBid !== null) {
+      if (nextVal === forbiddenDealerBid) {
+        // Skip over the forbidden bid in the same direction
+        nextVal = delta > 0 ? nextVal + 1 : nextVal - 1;
+      }
     }
 
-    setBids((prev) => ({ ...prev, [playerId]: nextVal }));
+    if (nextVal >= 0 && nextVal <= cards) {
+      setBids((prev) => ({ ...prev, [playerId]: nextVal }));
+    }
+  };
+
+  const handleSelectExactBid = (playerId: string, val: number) => {
+    const isDealer = playerId === dealer.id;
+    if (isDealer && rules.forbiddenDealerBid && val === forbiddenDealerBid) {
+      return;
+    }
+    setBids((prev) => ({ ...prev, [playerId]: Math.max(0, Math.min(cards, val)) }));
   };
 
   // Adjust actual tricks won for a player
@@ -114,6 +147,28 @@ export const ActiveRound: React.FC<ActiveRoundProps> = ({
     const current = actuals[playerId] ?? 0;
     const nextVal = Math.max(0, Math.min(cards, current + delta));
     setActuals((prev) => ({ ...prev, [playerId]: nextVal }));
+
+    const playerBid = bids[playerId];
+    if (playerBid !== undefined && nextVal !== current) {
+      if (nextVal !== playerBid) {
+        soundManager.playMiss();
+      } else {
+        soundManager.playHit();
+      }
+    }
+  };
+
+  const handleSelectExactActual = (playerId: string, val: number) => {
+    const nextVal = Math.max(0, Math.min(cards, val));
+    setActuals((prev) => ({ ...prev, [playerId]: nextVal }));
+    const playerBid = bids[playerId];
+    if (playerBid !== undefined) {
+      if (nextVal !== playerBid) {
+        soundManager.playMiss();
+      } else {
+        soundManager.playHit();
+      }
+    }
   };
 
   // Auto balance actual tricks if only 1 player remains
@@ -145,16 +200,33 @@ export const ActiveRound: React.FC<ActiveRoundProps> = ({
       return cards >= 4 && b === cards && a === cards;
     });
 
+    const failedPochaPlayer = players.find((p) => {
+      const b = bids[p.id];
+      const a = actuals[p.id];
+      return cards >= 4 && b === cards && a !== cards;
+    });
+
+    const hasMisses = players.some((p) => {
+      const b = bids[p.id];
+      const a = actuals[p.id];
+      return b !== undefined && a !== undefined && b !== a;
+    });
+
     if (pochaPlayer) {
       try {
         confetti({
-          particleCount: 100,
+          particleCount: 120,
           spread: 80,
           origin: { y: 0.5 },
         });
-      } catch (e) {
-        // ignore
-      }
+      } catch (e) {}
+      soundManager.playPochaHit();
+    } else if (failedPochaPlayer) {
+      soundManager.playPochaMiss();
+    } else if (hasMisses) {
+      soundManager.playMiss();
+    } else {
+      soundManager.playHit();
     }
 
     onUpdateActuals(actuals);
@@ -196,7 +268,7 @@ export const ActiveRound: React.FC<ActiveRoundProps> = ({
                   type="button"
                   onClick={onOpenEditRoundModal}
                   className="text-xs font-bold bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 px-2.5 py-1 rounded-md transition flex items-center space-x-1 cursor-pointer"
-                  title="Corregir un error en la puntuación de esta u otra ronda"
+                  title="Corregir un error en la puntuación o triunfo de esta u otra ronda"
                 >
                   <span>✏️ Corregir Ronda</span>
                 </button>
@@ -212,16 +284,44 @@ export const ActiveRound: React.FC<ActiveRoundProps> = ({
                   <span>➕ Unir Jugador</span>
                 </button>
               )}
+
+              {/* Sound Toggle Button */}
+              <button
+                type="button"
+                onClick={handleToggleSound}
+                className={`text-xs font-bold px-2.5 py-1 rounded-md border transition flex items-center space-x-1.5 cursor-pointer ${
+                  soundActive
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+                    : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:bg-slate-800'
+                }`}
+                title={soundActive ? 'Efectos de sonido activados (clic para silenciar)' : 'Efectos de sonido silenciados (clic para activar)'}
+              >
+                {soundActive ? (
+                  <>
+                    <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
+                    <span className="hidden sm:inline">Sonido ON</span>
+                  </>
+                ) : (
+                  <>
+                    <VolumeX className="w-3.5 h-3.5 text-slate-400" />
+                    <span className="hidden sm:inline">Sonido OFF</span>
+                  </>
+                )}
+              </button>
             </div>
 
             <h3 className="text-2xl sm:text-3xl font-extrabold text-white mt-1 flex items-center space-x-3">
               <span>🃏 {cards} {cards === 1 ? 'Carta' : 'Cartas'}</span>
-              {cards >= 4 && (
-                <span className="text-xs text-amber-400 font-bold bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-full flex items-center space-x-1">
-                  <Flame className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Pocha Posible ({cards} bazas = Doble del doble)</span>
-                </span>
-              )}
+              {cards >= 4 && (() => {
+                const isOros = round.trump === 'oros' && rules.doubleOros;
+                const pochaPts = (5 * cards + 10) * (isOros ? 4 : 2);
+                return (
+                  <span className="text-xs text-amber-400 font-bold bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-full flex items-center space-x-1">
+                    <Flame className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Pocha Posible: ±{pochaPts} pts {isOros ? '(Doble Oros)' : ''}</span>
+                  </span>
+                );
+              })()}
             </h3>
 
             {/* Dealer indicator */}
@@ -233,42 +333,51 @@ export const ActiveRound: React.FC<ActiveRoundProps> = ({
             </p>
           </div>
 
-          {/* Right: Trump Suit Selector & Card Drawer */}
-          <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 flex flex-col items-start sm:items-end space-y-2">
-            <div className="flex items-center justify-between w-full gap-2">
-              <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">
-                Triunfo en esta Ronda
-              </span>
+          {/* Right: High Visibility Trump Suit Selector & Card Drawer */}
+          <div className="bg-slate-900 border-2 border-slate-700/80 rounded-2xl p-4 flex flex-col space-y-3 shadow-xl w-full lg:w-auto">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center space-x-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping" />
+                <span className="text-xs font-black uppercase tracking-wider text-amber-400">
+                  Triunfa en la Ronda:
+                </span>
+                <span className="text-sm font-black text-white bg-slate-800 px-2.5 py-0.5 rounded-lg border border-slate-700">
+                  {suitInfo.symbol} {suitInfo.name.toUpperCase()} {suitInfo.isDouble ? '★ x2' : ''}
+                </span>
+              </div>
+
               <button
                 onClick={() => setShowCardDrawModal(true)}
-                className="text-[10px] font-bold bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-md flex items-center space-x-1 transition cursor-pointer"
+                className="text-xs font-black bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/40 px-3 py-1.5 rounded-lg flex items-center space-x-1.5 transition cursor-pointer shrink-0"
                 title="Sacar carta aleatoria de la baraja para definir triunfo"
               >
-                <Shuffle className="w-3 h-3 text-amber-400" />
-                <span>Sacar Carta Aleatoria</span>
+                <Shuffle className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden sm:inline">Sacar Carta</span>
               </button>
             </div>
 
-            <div className="flex items-center space-x-1.5 flex-wrap">
+            {/* Big, Highly Visible Trump Tags */}
+            <div className="grid grid-cols-5 gap-2">
               {(Object.keys(SUITS) as Suit[]).map((sKey) => {
                 const s = SUITS[sKey];
                 const isSelected = round.trump === sKey;
                 return (
                   <button
                     key={sKey}
+                    type="button"
                     onClick={() => onChangeTrump(sKey)}
-                    className={`px-2.5 py-1.5 rounded-lg border text-xs font-extrabold flex items-center space-x-1 transition cursor-pointer ${
+                    className={`py-2.5 sm:py-3 px-2 rounded-xl border text-center font-black transition cursor-pointer flex flex-col items-center justify-center space-y-0.5 ${
                       isSelected
-                        ? `${s.bgColor} ${s.color} ${s.borderColor} ring-2 ring-amber-400/50 scale-105 shadow-md`
-                        : 'bg-slate-800/80 text-slate-400 border-slate-700/80 hover:bg-slate-800 hover:text-white'
+                        ? `${s.bgColor} ${s.color} ${s.borderColor} ring-3 ring-amber-400 shadow-xl scale-[1.04] z-10`
+                        : 'bg-slate-800/90 text-slate-300 border-slate-700 hover:bg-slate-700/90 hover:text-white'
                     }`}
                     title={`Cambiar a triunfo de ${s.name}`}
                   >
-                    <span>{s.symbol}</span>
-                    <span className="hidden md:inline">{s.name}</span>
+                    <span className="text-xl sm:text-2xl leading-none">{s.symbol}</span>
+                    <span className="text-xs sm:text-sm font-black tracking-tight">{s.name}</span>
                     {s.isDouble && (
-                      <span className="text-[9px] bg-amber-500 text-slate-950 px-1 py-0.2 rounded font-black ml-1">
-                        x2
+                      <span className="text-[9px] bg-amber-500 text-slate-950 px-1.5 py-0.2 rounded font-black mt-0.5 shadow">
+                        x2 DOBLE
                       </span>
                     )}
                   </button>
@@ -277,9 +386,10 @@ export const ActiveRound: React.FC<ActiveRoundProps> = ({
             </div>
 
             {suitInfo.isDouble && (
-              <span className="text-[11px] text-amber-400 font-bold mt-1 animate-pulse">
-                ⚡ ¡Triunfo Oros! Puntuación DOBLE
-              </span>
+              <div className="bg-amber-500/20 border border-amber-500/40 rounded-lg py-1 px-2.5 text-center text-xs font-black text-amber-300 flex items-center justify-center space-x-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <span>¡RONDA EN OROS! Todas las puntuaciones se MULTIPLICAN x2</span>
+              </div>
             )}
           </div>
         </div>
@@ -441,121 +551,207 @@ export const ActiveRound: React.FC<ActiveRoundProps> = ({
                 </div>
 
                 {/* Counter Control depending on Phase */}
-                <div className="flex items-center justify-between sm:justify-end space-x-4">
+                <div className="flex flex-col sm:items-end space-y-2">
                   {isBiddingPhase ? (
                     /* Phase 1: Bids Control */
-                    <div className="flex items-center space-x-3">
-                      {isDealer && isForbiddenForThisDealer && (
-                        <span className="text-xs font-bold text-rose-400 bg-rose-500/10 border border-rose-500/30 px-2 py-1 rounded-lg flex items-center space-x-1">
-                          <ShieldAlert className="w-3.5 h-3.5" />
-                          <span>No puedes pedir {forbiddenDealerBid}</span>
-                        </span>
-                      )}
+                    <div className="flex flex-col sm:items-end space-y-2">
+                      <div className="flex items-center space-x-3">
+                        {isDealer && isForbiddenForThisDealer && (
+                          <span className="text-xs font-bold text-rose-400 bg-rose-500/10 border border-rose-500/30 px-2 py-1 rounded-lg flex items-center space-x-1">
+                            <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
+                            <span>Prohibido pedir {forbiddenDealerBid}</span>
+                          </span>
+                        )}
 
-                      <div className="flex items-center bg-slate-900 rounded-xl border border-slate-700 p-1">
-                        <button
-                          onClick={() => handleBidChange(player.id, -1)}
-                          disabled={currentBid === undefined || currentBid <= 0}
-                          className="w-10 h-10 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-slate-800 text-white font-black text-xl flex items-center justify-center transition cursor-pointer active:scale-95"
-                          title="Restar 1 baza"
-                        >
-                          -
-                        </button>
-                        <input
-                          type="number"
-                          min={0}
-                          max={cards}
-                          value={currentBid !== undefined ? currentBid : 0}
-                          onChange={(e) => {
-                            let val = parseInt(e.target.value, 10);
-                            if (isNaN(val)) val = 0;
-                            val = Math.max(0, Math.min(cards, val));
-                            if (isDealer && rules.forbiddenDealerBid && val === forbiddenDealerBid) {
-                              return;
-                            }
-                            setBids((prev) => ({ ...prev, [player.id]: val }));
-                          }}
-                          className="w-12 bg-transparent text-center text-xl font-black text-amber-300 focus:outline-none focus:bg-slate-800 rounded py-1 border-b border-dashed border-amber-500/40"
-                          title="Puedes tocar para escribir el número directamente"
-                        />
-                        <button
-                          onClick={() => handleBidChange(player.id, 1)}
-                          disabled={
-                            currentBid >= cards ||
-                            (isDealer &&
-                              rules.forbiddenDealerBid &&
-                              (currentBid ?? 0) + 1 === forbiddenDealerBid)
-                          }
-                          className="w-10 h-10 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-slate-800 text-white font-black text-xl flex items-center justify-center transition cursor-pointer active:scale-95"
-                          title="Sumar 1 baza"
-                        >
-                          +
-                        </button>
+                        <div className="flex items-center bg-slate-900 rounded-xl border border-slate-700 p-1 shadow-inner">
+                          <button
+                            type="button"
+                            onClick={() => handleBidChange(player.id, -1)}
+                            disabled={currentBid === undefined || currentBid <= 0}
+                            className="w-10 h-10 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-slate-800 text-white font-black text-xl flex items-center justify-center transition cursor-pointer active:scale-95"
+                            title="Restar 1 baza"
+                          >
+                            -
+                          </button>
+                          <input
+                            type="number"
+                            min={0}
+                            max={cards}
+                            value={currentBid !== undefined ? currentBid : 0}
+                            onChange={(e) => {
+                              let val = parseInt(e.target.value, 10);
+                              if (isNaN(val)) val = 0;
+                              val = Math.max(0, Math.min(cards, val));
+                              setBids((prev) => ({ ...prev, [player.id]: val }));
+                            }}
+                            className={`w-14 bg-transparent text-center text-xl font-black rounded py-1 border-b border-dashed focus:outline-none focus:bg-slate-800 ${
+                              isDealer && isForbiddenForThisDealer && currentBid === forbiddenDealerBid
+                                ? 'text-rose-400 border-rose-500 bg-rose-950/30'
+                                : 'text-amber-300 border-amber-500/40'
+                            }`}
+                            title="Puedes tocar para escribir el número directamente"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleBidChange(player.id, 1)}
+                            disabled={currentBid >= cards}
+                            className="w-10 h-10 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-slate-800 text-white font-black text-xl flex items-center justify-center transition cursor-pointer active:scale-95"
+                            title="Sumar 1 baza"
+                          >
+                            +
+                          </button>
+                        </div>
                       </div>
+
+                      {/* Quick Bid Number Selection Pills */}
+                      {cards <= 10 && (
+                        <div className="flex flex-wrap items-center gap-1 max-w-full justify-start sm:justify-end">
+                          {Array.from({ length: cards + 1 }, (_, i) => i).map((num) => {
+                            const isSelected = currentBid === num;
+                            const isForbiddenPill =
+                              isDealer &&
+                              rules.forbiddenDealerBid &&
+                              forbiddenDealerBid !== null &&
+                              num === forbiddenDealerBid;
+
+                            return (
+                              <button
+                                key={num}
+                                type="button"
+                                disabled={isForbiddenPill}
+                                onClick={() => handleSelectExactBid(player.id, num)}
+                                title={
+                                  isForbiddenPill
+                                    ? `Prohibido pedir ${num} bazas para el repartidor`
+                                    : `Pedir ${num} ${num === 1 ? 'baza' : 'bazas'}`
+                                }
+                                className={`h-7 px-2 text-xs font-bold rounded-md transition cursor-pointer border ${
+                                  isSelected
+                                    ? 'bg-amber-500 text-slate-950 border-amber-400 font-black shadow-sm'
+                                    : isForbiddenPill
+                                    ? 'bg-rose-950/40 text-rose-500/40 border-rose-900/50 line-through cursor-not-allowed'
+                                    : 'bg-slate-800/80 hover:bg-slate-700 text-slate-300 border-slate-700/80'
+                                }`}
+                              >
+                                {num}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   ) : (
                     /* Phase 2: Actuals Control */
-                    <div className="flex items-center space-x-4">
-                      {/* Show bid for comparison */}
-                      <div className="text-right">
-                        <span className="text-[10px] uppercase font-bold text-slate-400 block">
-                          Pidió
-                        </span>
-                        <span className="text-sm font-bold text-amber-300">
-                          {currentBid} {currentBid === 1 ? 'baza' : 'bazas'}
-                        </span>
+                    <div className="flex flex-col sm:items-end space-y-2">
+                      <div className="flex items-center space-x-4">
+                        {/* Show bid for comparison */}
+                        <div className="text-right">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block">
+                            Pidió
+                          </span>
+                          <span className="text-sm font-bold text-amber-300">
+                            {currentBid} {currentBid === 1 ? 'baza' : 'bazas'}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center bg-slate-900 rounded-xl border border-slate-700 p-1 shadow-inner">
+                          <button
+                            type="button"
+                            onClick={() => handleActualChange(player.id, -1)}
+                            disabled={currentActual === undefined || currentActual <= 0}
+                            className="w-10 h-10 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-slate-800 text-white font-black text-xl flex items-center justify-center transition cursor-pointer active:scale-95"
+                            title="Restar 1 baza hecha"
+                          >
+                            -
+                          </button>
+                          <input
+                            type="number"
+                            min={0}
+                            max={cards}
+                            value={currentActual !== undefined ? currentActual : 0}
+                            onChange={(e) => {
+                              let val = parseInt(e.target.value, 10);
+                              if (isNaN(val)) val = 0;
+                              val = Math.max(0, Math.min(cards, val));
+                              setActuals((prev) => ({ ...prev, [player.id]: val }));
+                            }}
+                            className="w-14 bg-transparent text-center text-xl font-black text-emerald-400 focus:outline-none focus:bg-slate-800 rounded py-1 border-b border-dashed border-emerald-500/40"
+                            title="Puedes tocar para escribir el número directamente"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleActualChange(player.id, 1)}
+                            disabled={currentActual >= cards}
+                            className="w-10 h-10 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-slate-800 text-white font-black text-xl flex items-center justify-center transition cursor-pointer active:scale-95"
+                            title="Sumar 1 baza hecha"
+                          >
+                            +
+                          </button>
+                        </div>
+
+                        {/* Live Hit/Miss indicator & Pocha Badge */}
+                        {currentActual !== undefined && currentBid !== undefined && (() => {
+                          const scoreResult = calculateScore(currentBid, currentActual, round.trump, cards, rules);
+                          const isPochaAttempt = cards >= 4 && currentBid === cards && rules?.pochaDoubleDouble !== false;
+
+                          if (isPochaAttempt && scoreResult.hit) {
+                            return (
+                              <div className="w-28 text-center hidden sm:block">
+                                <span className="text-xs font-black text-amber-950 bg-amber-400 px-2 py-1 rounded shadow flex items-center justify-center space-x-1 animate-bounce">
+                                  <Flame className="w-3.5 h-3.5 fill-amber-950" />
+                                  <span>POCHA! (+{scoreResult.points} pts)</span>
+                                </span>
+                              </div>
+                            );
+                          } else if (isPochaAttempt && !scoreResult.hit) {
+                            return (
+                              <div className="w-28 text-center hidden sm:block">
+                                <span className="text-xs font-extrabold text-rose-200 bg-rose-950/80 border border-rose-500/50 px-2 py-1 rounded shadow flex items-center justify-center space-x-1">
+                                  <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
+                                  <span>POCHA! ({scoreResult.points} pts)</span>
+                                </span>
+                              </div>
+                            );
+                          } else if (scoreResult.hit) {
+                            return (
+                              <div className="w-24 text-center hidden sm:block">
+                                <span className="text-xs font-extrabold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20">
+                                  ✓ Acierta (+{scoreResult.points} pts)
+                                </span>
+                              </div>
+                            );
+                          } else {
+                            return (
+                              <div className="w-24 text-center hidden sm:block">
+                                <span className="text-xs font-extrabold text-rose-400 bg-rose-500/10 px-2 py-1 rounded border border-rose-500/20">
+                                  ✗ Falla ({scoreResult.points} pts)
+                                </span>
+                              </div>
+                            );
+                          }
+                        })()}
                       </div>
 
-                      <div className="flex items-center bg-slate-900 rounded-xl border border-slate-700 p-1">
-                        <button
-                          onClick={() => handleActualChange(player.id, -1)}
-                          disabled={currentActual === undefined || currentActual <= 0}
-                          className="w-10 h-10 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-slate-800 text-white font-black text-xl flex items-center justify-center transition cursor-pointer active:scale-95"
-                          title="Restar 1 baza hecha"
-                        >
-                          -
-                        </button>
-                        <input
-                          type="number"
-                          min={0}
-                          max={cards}
-                          value={currentActual !== undefined ? currentActual : 0}
-                          onChange={(e) => {
-                            let val = parseInt(e.target.value, 10);
-                            if (isNaN(val)) val = 0;
-                            val = Math.max(0, Math.min(cards, val));
-                            setActuals((prev) => ({ ...prev, [player.id]: val }));
-                          }}
-                          className="w-12 bg-transparent text-center text-xl font-black text-emerald-400 focus:outline-none focus:bg-slate-800 rounded py-1 border-b border-dashed border-emerald-500/40"
-                          title="Puedes tocar para escribir el número directamente"
-                        />
-                        <button
-                          onClick={() => handleActualChange(player.id, 1)}
-                          disabled={currentActual >= cards}
-                          className="w-10 h-10 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-slate-800 text-white font-black text-xl flex items-center justify-center transition cursor-pointer active:scale-95"
-                          title="Sumar 1 baza hecha"
-                        >
-                          +
-                        </button>
-                      </div>
-
-                      {/* Live Hit/Miss indicator & Pocha Badge */}
-                      {currentActual !== undefined && currentBid !== undefined && (
-                        <div className="w-24 text-center">
-                          {isPochaHit ? (
-                            <span className="text-xs font-black text-amber-950 bg-amber-400 px-2 py-1 rounded shadow flex items-center justify-center space-x-1 animate-bounce">
-                              <Flame className="w-3.5 h-3.5 fill-amber-950" />
-                              <span>POCHA! (+{5 * cards * 4} pts)</span>
-                            </span>
-                          ) : currentActual === currentBid ? (
-                            <span className="text-xs font-extrabold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20">
-                              ✓ Acierta
-                            </span>
-                          ) : (
-                            <span className="text-xs font-extrabold text-rose-400 bg-rose-500/10 px-2 py-1 rounded border border-rose-500/20">
-                              ✗ Falla ({Math.abs(currentBid - currentActual)})
-                            </span>
-                          )}
+                      {/* Quick Actuals Selection Pills */}
+                      {cards <= 10 && (
+                        <div className="flex flex-wrap items-center gap-1 max-w-full justify-start sm:justify-end">
+                          {Array.from({ length: cards + 1 }, (_, i) => i).map((num) => {
+                            const isSelected = currentActual === num;
+                            return (
+                              <button
+                                key={num}
+                                type="button"
+                                onClick={() => handleSelectExactActual(player.id, num)}
+                                className={`h-7 px-2 text-xs font-bold rounded-md transition cursor-pointer border ${
+                                  isSelected
+                                    ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-black shadow-sm'
+                                    : 'bg-slate-800/80 hover:bg-slate-700 text-slate-300 border-slate-700/80'
+                                }`}
+                              >
+                                {num}
+                              </button>
+                            );
+                          })}
                         </div>
                       )}
                     </div>

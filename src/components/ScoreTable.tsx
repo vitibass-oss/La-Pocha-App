@@ -104,8 +104,8 @@ export const ScoreTable: React.FC<ScoreTableProps> = ({
             {rounds.map((round, rIdx) => {
               const isCurrent = rIdx === currentRoundIndex;
               const isCompleted = round.phase === 'completed';
-              const dealer = players[round.dealerIndex] || players[0];
-              const suit = SUITS[round.trump];
+              const dealer = players[round.dealerIndex] || players[0] || { name: 'Jugador 1' };
+              const suit = SUITS[round.trump] || SUITS['oros'];
 
               return (
                 <tr

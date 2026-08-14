@@ -5,6 +5,12 @@ import {
   recalculateGameScores,
   calculatePlayerStats,
 } from './utils/pocha';
+import {
+  saveCompletedGame,
+  loadRecentWinners,
+  RecentWinner,
+  SavedGame,
+} from './utils/history';
 import { Navbar } from './components/Navbar';
 import { SetupGame } from './components/SetupGame';
 import { ActiveRound } from './components/ActiveRound';
@@ -17,7 +23,8 @@ import { GameSummaryModal } from './components/GameSummaryModal';
 import { DownloadAppModal } from './components/DownloadAppModal';
 import { AddPlayerModal } from './components/AddPlayerModal';
 import { EditRoundModal } from './components/EditRoundModal';
-import { Trophy, Play, BarChart3, RotateCcw, AlertTriangle } from 'lucide-react';
+import { SavedGamesModal } from './components/SavedGamesModal';
+import { Trophy, Play, BarChart3, RotateCcw, AlertTriangle, FolderArchive } from 'lucide-react';
 
 const STORAGE_KEY = 'pocha_game_v2';
 
@@ -50,6 +57,9 @@ export default function App() {
     return null;
   });
 
+  // Recent winners state
+  const [recentWinners, setRecentWinners] = useState<RecentWinner[]>(() => loadRecentWinners());
+
   // Modal Visibility States
   const [showVoiceModal, setShowVoiceModal] = useState(false);
   const [voiceMode, setVoiceMode] = useState<'bids' | 'actuals'>('bids');
@@ -59,6 +69,7 @@ export default function App() {
   const [showDownloadModal, setShowDownloadModal] = useState(false);
   const [showAddPlayerModal, setShowAddPlayerModal] = useState(false);
   const [showEditRoundModal, setShowEditRoundModal] = useState(false);
+  const [showSavedGamesModal, setShowSavedGamesModal] = useState(false);
   const [editRoundIndex, setEditRoundIndex] = useState(0);
   const [showNewGameConfirmModal, setShowNewGameConfirmModal] = useState(false);
   const [showResetRoundConfirmModal, setShowResetRoundConfirmModal] = useState(false);
@@ -168,15 +179,20 @@ export default function App() {
     const nextIndex = currentIdx + 1;
     const isFinished = nextIndex >= recalculated.length;
 
-    setGame({
+    const updatedGame: Game = {
       ...game,
       rounds: recalculated,
       currentRoundIndex: isFinished ? currentIdx : nextIndex,
       isFinished,
       updatedAt: new Date().toISOString(),
-    });
+    };
+
+    setGame(updatedGame);
 
     if (isFinished) {
+      const finalStats = calculatePlayerStats(game.players, recalculated);
+      saveCompletedGame(updatedGame, finalStats);
+      setRecentWinners(loadRecentWinners());
       setShowSummaryModal(true);
     }
   };
@@ -243,14 +259,19 @@ export default function App() {
     });
   };
 
-  // Bulk save round scores from EditRoundModal
+  // Bulk save round scores and trump from EditRoundModal
   const handleSaveBulkRoundScore = (
     roundIndex: number,
-    updatedScoresMap: Record<string, { bid: number; actual: number }>
+    updatedScoresMap: Record<string, { bid: number; actual: number }>,
+    updatedTrump?: Suit
   ) => {
     if (!game) return;
     const updatedRounds = [...game.rounds];
     const targetRound = { ...updatedRounds[roundIndex] };
+
+    if (updatedTrump) {
+      targetRound.trump = updatedTrump;
+    }
 
     const newScores = { ...targetRound.scores };
     game.players.forEach((p) => {
@@ -278,6 +299,33 @@ export default function App() {
 
     const recalculated = recalculateGameScores(game.players, updatedRounds, game.rules);
     setGame({ ...game, rounds: recalculated });
+  };
+
+  // Delete a round dynamically from the active game
+  const handleDeleteRound = (roundIndex: number) => {
+    if (!game || game.rounds.length <= 1) return;
+    const updatedRounds = game.rounds.filter((_, idx) => idx !== roundIndex);
+    // Re-index round numbers
+    const reindexedRounds = updatedRounds.map((r, idx) => ({
+      ...r,
+      roundNumber: idx + 1,
+      id: `round_${idx + 1}`,
+    }));
+
+    let nextCurrentIdx = game.currentRoundIndex;
+    if (roundIndex < nextCurrentIdx) {
+      nextCurrentIdx = Math.max(0, nextCurrentIdx - 1);
+    } else if (nextCurrentIdx >= reindexedRounds.length) {
+      nextCurrentIdx = reindexedRounds.length - 1;
+    }
+
+    const recalculated = recalculateGameScores(game.players, reindexedRounds, game.rules);
+    setGame({
+      ...game,
+      rounds: recalculated,
+      currentRoundIndex: nextCurrentIdx,
+      updatedAt: new Date().toISOString(),
+    });
   };
 
   // Confirm Reset Current Round
@@ -329,6 +377,7 @@ export default function App() {
         }}
         onShowStats={() => setShowStatsModal(true)}
         onShowRules={() => setShowRulesModal(true)}
+        onShowHistory={() => setShowSavedGamesModal(true)}
         onShowDownload={() => setShowDownloadModal(true)}
         onResetRound={handleResetCurrentRound}
         isGameActive={!!game}
@@ -340,7 +389,11 @@ export default function App() {
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-8">
         {!game ? (
           /* Game Setup View */
-          <SetupGame onStartGame={handleStartGame} />
+          <SetupGame
+            onStartGame={handleStartGame}
+            recentWinners={recentWinners}
+            onOpenSavedGamesModal={() => setShowSavedGamesModal(true)}
+          />
         ) : (
           /* Active Game View */
           <div className="space-y-8">
@@ -469,6 +522,7 @@ export default function App() {
           rules={game.rules}
           initialRoundIndex={editRoundIndex}
           onSaveRoundScore={handleSaveBulkRoundScore}
+          onDeleteRound={handleDeleteRound}
         />
       )}
 
@@ -483,6 +537,18 @@ export default function App() {
           }}
         />
       )}
+
+      {/* Saved Games and Historical Winners Modal */}
+      <SavedGamesModal
+        isOpen={showSavedGamesModal}
+        onClose={() => {
+          setShowSavedGamesModal(false);
+          setRecentWinners(loadRecentWinners());
+        }}
+        onGameDeleted={() => {
+          setRecentWinners(loadRecentWinners());
+        }}
+      />
 
       {/* Confirmation Modal for New Game */}
       {showNewGameConfirmModal && (

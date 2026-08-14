@@ -1,18 +1,21 @@
-const CACHE_NAME = 'pocha-app-v3';
+const CACHE_NAME = 'pocha-app-v4';
 const STATIC_ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/icon-192.svg',
-  '/icon-512.svg'
+  './',
+  './index.html',
+  './manifest.json',
+  './icon-192.svg',
+  './icon-512.svg'
 ];
 
 // Install Event - Pre-cache core shell
 self.addEventListener('install', (event) => {
+  self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(STATIC_ASSETS);
-    }).then(() => self.skipWaiting())
+      return cache.addAll(STATIC_ASSETS).catch((err) => {
+        console.warn('SW pre-cache warning:', err);
+      });
+    })
   );
 });
 
@@ -31,6 +34,13 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// Handle messages from app (e.g. force skip waiting or clear cache)
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
 // Fetch Event - Network First for HTML, Cache First with revalidation for static assets
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
@@ -42,16 +52,20 @@ self.addEventListener('fetch', (event) => {
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request)
-        .then((networkResponse) => {
+        .then(async (networkResponse) => {
           if (networkResponse && networkResponse.status === 200) {
-            const copy = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+            // Check HTML body to make sure it's not a Cloud Run / Vite proxy building response
+            const text = await networkResponse.clone().text();
+            if (!text.includes('Por favor, espere') && !text.includes('compilación')) {
+              const copy = networkResponse.clone();
+              caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+            }
           }
           return networkResponse;
         })
         .catch(() => {
           return caches.match(event.request).then((cached) => {
-            return cached || caches.match('/index.html') || caches.match('/');
+            return cached || caches.match('./index.html') || caches.match('./') || caches.match('/index.html') || caches.match('/');
           });
         })
     );

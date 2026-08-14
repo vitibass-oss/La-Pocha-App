@@ -1,18 +1,24 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { GameRules, Player } from '../types';
-import { PLAYER_AVATARS, PLAYER_COLORS, getDefaultDeckForPlayers } from '../utils/pocha';
-import { Users, Settings, Play, Sparkles, Check, HelpCircle, Mic, MicOff } from 'lucide-react';
+import { PLAYER_AVATARS, PLAYER_COLORS, getDefaultDeckForPlayers, TARGET_ROUNDS_FOR_PLAYERS } from '../utils/pocha';
+import { RecentWinner } from '../utils/history';
+import { RecentWinnersBoard } from './RecentWinnersBoard';
+import { Users, Settings, Play, Sparkles, Check, HelpCircle, Mic, MicOff, FolderArchive } from 'lucide-react';
 
 interface SetupGameProps {
   onStartGame: (players: Player[], rules: GameRules) => void;
   initialPlayers?: Player[];
   initialRules?: GameRules;
+  recentWinners?: RecentWinner[];
+  onOpenSavedGamesModal?: () => void;
 }
 
 export const SetupGame: React.FC<SetupGameProps> = ({
   onStartGame,
   initialPlayers,
   initialRules,
+  recentWinners = [],
+  onOpenSavedGamesModal,
 }) => {
   const [numPlayers, setNumPlayers] = useState<number>(initialPlayers?.length || 5);
 
@@ -43,8 +49,9 @@ export const SetupGame: React.FC<SetupGameProps> = ({
       deckCards: autoDeck,
       pochaDoubleDouble: true,
       enableSubastado: true,
+      singleMaxCardsRound: true,
       randomTrumpAfterSubastado: true,
-      visibleTrumpAfterSubastado: true,
+      visibleTrumpAfterSubastado: false,
     };
   });
 
@@ -212,7 +219,13 @@ export const SetupGame: React.FC<SetupGameProps> = ({
   };
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-6">
+    <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
+      {/* 🏆 Persistent History: Last 5 Winners Board */}
+      <RecentWinnersBoard
+        winners={recentWinners}
+        onOpenHistoryModal={onOpenSavedGamesModal}
+      />
+
       <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden">
         {/* Bento Header Banner */}
         <div className="bg-slate-950 p-6 sm:p-8 border-b border-slate-800">
@@ -232,9 +245,23 @@ export const SetupGame: React.FC<SetupGameProps> = ({
               </p>
             </div>
 
-            <div className="bg-slate-900 border border-slate-700 px-4 py-2.5 rounded-xl text-center min-w-[120px]">
-              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Cartas en Mazo</p>
-              <p className="text-2xl font-black text-yellow-500">{deckCards}</p>
+            <div className="flex items-center gap-3">
+              {onOpenSavedGamesModal && (
+                <button
+                  type="button"
+                  onClick={onOpenSavedGamesModal}
+                  className="bg-slate-900 hover:bg-slate-800 border border-slate-700 px-3.5 py-2.5 rounded-xl text-center text-xs font-bold text-slate-300 hover:text-amber-400 transition flex items-center space-x-1.5 cursor-pointer"
+                  title="Abrir almacén de partidas guardadas"
+                >
+                  <FolderArchive className="w-4 h-4 text-amber-400" />
+                  <span>Histórico</span>
+                </button>
+              )}
+
+              <div className="bg-slate-900 border border-slate-700 px-4 py-2.5 rounded-xl text-center min-w-[120px]">
+                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Cartas en Mazo</p>
+                <p className="text-2xl font-black text-yellow-500">{deckCards}</p>
+              </div>
             </div>
           </div>
         </div>
@@ -254,20 +281,26 @@ export const SetupGame: React.FC<SetupGameProps> = ({
               <div className="grid grid-cols-5 gap-2">
                 {[4, 5, 6, 7, 8].map((count) => {
                   const isSelected = numPlayers === count;
+                  const roundsCount = TARGET_ROUNDS_FOR_PLAYERS[count] || 32;
                   return (
                     <button
                       key={count}
                       type="button"
                       onClick={() => handleNumPlayersChange(count)}
-                      className={`py-3 px-1 rounded-xl border text-center transition cursor-pointer flex flex-col items-center justify-center ${
+                      className={`py-2.5 px-1 rounded-xl border text-center transition cursor-pointer flex flex-col items-center justify-center ${
                         isSelected
                           ? 'bg-yellow-500 text-slate-950 border-yellow-400 font-black shadow-[0_0_12px_rgba(234,179,8,0.4)] scale-105'
                           : 'bg-slate-800/80 hover:bg-slate-800 text-slate-300 border-slate-700 font-semibold'
                       }`}
                     >
-                      <span className="text-xl font-black">{count}</span>
+                      <span className="text-lg font-black">{count}</span>
                       <span className="text-[9px] uppercase font-bold tracking-wider opacity-80">
                         Jug.
+                      </span>
+                      <span className={`text-[8px] font-black px-1 rounded mt-0.5 ${
+                        isSelected ? 'bg-slate-950/20 text-slate-950' : 'text-amber-400/90'
+                      }`}>
+                        {roundsCount}R
                       </span>
                     </button>
                   );
@@ -465,7 +498,30 @@ export const SetupGame: React.FC<SetupGameProps> = ({
                     </span>
                   </div>
                   <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                    Si un jugador hace todas las bazas en manos de 4+ cartas, puntúa el doble del doble (x4). Ej: 5 bazas = 100 ptos.
+                    Si se piden todas las bazas en manos de 4+ cartas (Pocha): acierto = +(5×cartas + 10)×2 (o ×4 en Oros). Ej. 8c en Oros: +200 / -200 ptos (8×5=40 + 10=50, ×2 Oros = 100, ×2 Pocha = 200).
+                  </p>
+                </div>
+              </label>
+
+              {/* Regla Ronda Única de Todas las Cartas vs Vuelta Completa */}
+              <label className="bg-slate-900/40 border border-slate-800 hover:border-yellow-500/40 rounded-xl p-4 flex items-start space-x-3 cursor-pointer transition">
+                <input
+                  type="checkbox"
+                  checked={rules.singleMaxCardsRound !== false}
+                  onChange={(e) => setRules({ ...rules, singleMaxCardsRound: e.target.checked })}
+                  className="mt-1 w-4 h-4 rounded accent-yellow-500 bg-slate-950 border-slate-800"
+                />
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-base">🃏</span>
+                    <span className="font-bold text-sm text-emerald-400">
+                      1 Sola Ronda de Todas las Cartas
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                    {rules.singleMaxCardsRound !== false
+                      ? 'Se juega exactamente 1 sola mano en la cima con todas las cartas, pasando directamente a la bajada.'
+                      : 'Se juega 1 vuelta completa de todas las cartas (1 mano repartida por cada jugador).'}
                   </p>
                 </div>
               </label>
@@ -482,16 +538,16 @@ export const SetupGame: React.FC<SetupGameProps> = ({
                   <div className="flex items-center space-x-2">
                     <span className="text-base">👑</span>
                     <span className="font-bold text-sm text-purple-300">
-                      Ronda de Subastado en Máximas
+                      Subastado en Todas las Cartas
                     </span>
                   </div>
                   <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                    Ronda con cartas máximas donde el jugador que pida más bazas elige el palo de triunfo.
+                    En la ronda de todas las cartas, el jugador que pida más bazas elige el palo de triunfo.
                   </p>
                 </div>
               </label>
 
-              {/* Regla Triunfo Aleatorio tras Subastado */}
+              {/* Regla Triunfo Aleatorio si no es Subastado */}
               <label className="bg-slate-900/40 border border-slate-800 hover:border-yellow-500/40 rounded-xl p-4 flex items-start space-x-3 cursor-pointer transition">
                 <input
                   type="checkbox"
@@ -507,7 +563,7 @@ export const SetupGame: React.FC<SetupGameProps> = ({
                     </span>
                   </div>
                   <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                    Al terminar la ronda de subastado, se juega una vuelta completa de cartas máximas donde cada repartidor saca una carta aleatoria para definir su triunfo.
+                    Si no se juega subastado, en la vuelta de cartas máximas cada repartidor saca una carta al azar de la baraja para definir su triunfo.
                   </p>
                 </div>
               </label>

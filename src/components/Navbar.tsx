@@ -1,11 +1,12 @@
 import React from 'react';
-import { Trophy, BarChart3, RotateCcw, PlusCircle, HelpCircle, Download } from 'lucide-react';
+import { Trophy, BarChart3, RotateCcw, PlusCircle, HelpCircle, Download, FolderArchive } from 'lucide-react';
 
 interface NavbarProps {
   appName: string;
   onNewGame: () => void;
   onShowStats: () => void;
   onShowRules: () => void;
+  onShowHistory?: () => void;
   onShowDownload?: () => void;
   onResetRound: () => void;
   isGameActive: boolean;
@@ -18,6 +19,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onNewGame,
   onShowStats,
   onShowRules,
+  onShowHistory,
   onShowDownload,
   onResetRound,
   isGameActive,
@@ -74,6 +76,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <span className="hidden md:inline">Reiniciar Ronda</span>
               </button>
             </>
+          )}
+
+          {onShowHistory && (
+            <button
+              onClick={onShowHistory}
+              className="flex items-center space-x-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-amber-300 px-2.5 py-1.5 rounded-lg text-xs font-bold transition border border-slate-700 cursor-pointer"
+              title="Ver Almacén de Partidas Guardadas e Histórico de Ganadores"
+            >
+              <FolderArchive className="w-4 h-4 text-amber-400" />
+              <span className="hidden md:inline">Histórico</span>
+            </button>
           )}
 
           {onShowDownload && (

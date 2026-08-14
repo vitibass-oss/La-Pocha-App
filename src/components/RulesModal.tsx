@@ -57,21 +57,27 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
             </div>
           </section>
 
-          {/* Section 2: Regla de Pocha (Doble del Doble) */}
+          {/* Section 2: Regla de Pocha (Pedir todas las bazas en 4+ cartas) */}
           <section className="space-y-3">
             <h4 className="font-extrabold text-amber-400 text-base flex items-center space-x-2">
               <span>🔥</span>
-              <span>2. Regla de "Pocha" (Doble del Doble)</span>
+              <span>2. Regla de "Pocha" (Pedir todas las bazas en 4+ cartas)</span>
             </h4>
-            <div className="bg-amber-500/10 border border-amber-500/30 p-4 rounded-xl space-y-2 text-amber-200">
-              <p className="font-semibold">
-                Cuando un jugador logra ganar <strong>TODAS LAS BAZAS</strong> de una mano de 4 o más cartas, se considera <strong>POCHA</strong> y la puntuación es el <em>Doble del Doble (x4)</em>.
+            <div className="bg-amber-500/10 border border-amber-500/30 p-4 rounded-xl space-y-3 text-amber-200">
+              <p className="font-semibold text-xs leading-relaxed">
+                A partir de manos de 4 o más cartas (4, 5, 6, 7, 8, 9, 10...), si un jugador pide <strong>TODAS LAS BAZAS</strong> de la mano, está pidiendo <strong>POCHA</strong>. Se calcula: <em>5 ptos × bazas + 10 (base)</em>, multiplicado por 2 por Pocha (y por 2 adicional si es Oros). Si falla, se resta exactamente esa misma cantidad:
               </p>
-              <div className="bg-slate-900/90 p-3 rounded-lg border border-amber-500/20 text-xs text-slate-300">
-                <span className="font-bold text-amber-400 block mb-1">
-                  Ejemplo en Mano de 5 Cartas:
-                </span>
-                5 puntos por 5 bazas = 25. El doble = 50. ¡Y el doble por hacer Pocha = <strong>100 Puntos</strong>!
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                <div className="bg-slate-900/90 p-2.5 rounded-lg border border-amber-500/20">
+                  <span className="font-bold text-amber-400 block mb-0.5">Pocha de 4 Cartas (en Oros):</span>
+                  4 × 5 = 20 + 10 = 30 ptos. Doble por Pocha = 60 ptos, y doble por Oros = <strong>120 Puntos</strong>.
+                  <br /><span className="text-emerald-400 font-bold">Acierto: +120 ptos</span> | <span className="text-rose-400 font-bold">Fallo: -120 ptos</span>
+                </div>
+                <div className="bg-slate-900/90 p-2.5 rounded-lg border border-amber-500/20">
+                  <span className="font-bold text-amber-400 block mb-0.5">Pocha de 8 Cartas (en Oros):</span>
+                  8 × 5 = 40 + 10 = 50 ptos. Doble por Pocha = 100 ptos, y doble por Oros = <strong>200 Puntos</strong>.
+                  <br /><span className="text-emerald-400 font-bold">Acierto: +200 ptos</span> | <span className="text-rose-400 font-bold">Fallo: -200 ptos</span>
+                </div>
               </div>
             </div>
           </section>
@@ -83,9 +89,8 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
               <span>3. Puntuación Especial para Triunfo de Oros</span>
             </h4>
             <div className="bg-amber-500/10 border border-amber-500/30 p-4 rounded-xl space-y-3 text-amber-200">
-              <p className="font-semibold">
-                Cuando el palo de triunfo de la mano es <strong>OROS</strong>, ¡toda la puntuación
-                de la ronda se multiplica por dos!
+              <p className="font-semibold text-xs leading-relaxed">
+                Cuando el palo de triunfo de la mano es <strong>OROS</strong>, la puntuación estándar de acierto o fallo se multiplica por dos. (La Pocha ya aplica su propia puntuación de doble del doble).
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
@@ -137,19 +142,22 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
             <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2 text-xs">
               <ol className="list-decimal list-inside space-y-1.5 font-medium">
                 <li>
-                  <strong>Elección de Triunfo:</strong> Al inicio de la partida o rondas, la baraja se corta para elegir un triunfo aleatorio extraído por un jugador.
+                  <strong>Primera Vuelta Completa (1 Carta):</strong> Se juega 1 mano de 1 carta por cada jugador (N manos en total).
                 </li>
                 <li>
-                  <strong>Subida:</strong> Se reparten 1, 2, 3... subiendo hasta el número máximo de cartas posible.
+                  <strong>Subida:</strong> Se reparte 1 mano de 2 cartas, 1 mano de 3 cartas, 4, 5... subiendo hasta alcanzar el máximo de cartas posibles (según el número de jugadores y mazo).
                 </li>
                 <li>
-                  <strong className="text-purple-300">Ronda de Subastado:</strong> Mano con cartas máximas donde NO hay triunfo prefijado. El jugador que pida mayor número de bazas elegirá el palo de triunfo.
+                  <strong className="text-purple-300">Vuelta Completa de Subastado (Máximas):</strong> 1 mano por cada jugador con cartas máximas. El jugador que más bazas pide elige el palo de triunfo.
                 </li>
                 <li>
-                  <strong className="text-blue-300">Ronda de Triunfo Visible:</strong> Se juega con cartas máximas con el triunfo ya visible boca arriba en la mesa.
+                  <strong className="text-cyan-300">Vuelta Completa de Máximas (Triunfo Dador/Aleatorio):</strong> 1 mano por cada jugador con cartas máximas donde el repartidor pone o saca el triunfo del mazo.
                 </li>
                 <li>
-                  <strong>Bajada:</strong> Descendiendo progresivamente hasta volver a 1 carta.
+                  <strong>Bajada:</strong> Se desciende una mano de Máximas-1, Máximas-2... hasta llegar a 2 cartas.
+                </li>
+                <li>
+                  <strong>Vuelta Final Completa (1 Carta):</strong> Se cierra la partida con 1 mano de 1 carta por cada jugador (N manos).
                 </li>
               </ol>
             </div>

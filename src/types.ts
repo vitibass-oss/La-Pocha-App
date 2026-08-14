@@ -55,6 +55,7 @@ export interface GameRules {
   deckCards?: number;          // Total cards in deck (e.g. 40, 48, 49, 52)
   pochaDoubleDouble?: boolean; // Make all tricks in >= 4 cards scores 4x (doble del doble)
   enableSubastado?: boolean;   // Enable subastado round in max cards
+  singleMaxCardsRound?: boolean; // If true, plays exactly 1 single hand of max cards instead of a full round per player
   randomTrumpAfterSubastado?: boolean; // Enable max cards round with random trump drawn by dealer
   visibleTrumpAfterSubastado?: boolean; // Enable max cards round with visible trump after subastado
 }

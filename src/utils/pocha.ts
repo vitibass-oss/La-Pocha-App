@@ -69,6 +69,23 @@ export const PLAYER_AVATARS = [
 ];
 
 /**
+ * Exact target rounds distribution specified by the official rules:
+ * 4 jugadores -> 32 rondas
+ * 5 jugadores -> 32 rondas
+ * 6 jugadores -> 38 rondas
+ * 7 jugadores -> 38 rondas
+ * 8 jugadores -> 44 rondas
+ */
+export const TARGET_ROUNDS_FOR_PLAYERS: Record<number, number> = {
+  3: 28,
+  4: 32,
+  5: 32,
+  6: 38,
+  7: 38,
+  8: 44,
+};
+
+/**
  * Calculates default deck cards based on exact player count rules:
  * 4 players -> 40 cards
  * 5 players -> 40 cards
@@ -97,7 +114,12 @@ export function getMaxCards(numPlayers: number, deckCards: number = 40): number 
 
 /**
  * Generates the full list of rounds according to Spanish Pocha rules
- * Includes Subastado phase and Triunfo Visible phase
+ * Produces exactly the target round counts:
+ * 4 jugadores -> 32 rondas
+ * 5 jugadores -> 32 rondas
+ * 6 jugadores -> 38 rondas
+ * 7 jugadores -> 38 rondas
+ * 8 jugadores -> 44 rondas
  */
 export function generateDefaultRounds(
   numPlayers: number,
@@ -124,7 +146,7 @@ export function generateDefaultRounds(
     return d;
   };
 
-  // Phase 1: Primera vuelta de 1 carta (1 ronda por cada jugador)
+  // Phase 1: Primera vuelta de 1 carta (1 mano por cada jugador = numPlayers rondas)
   for (let i = 0; i < numPlayers; i++) {
     rounds.push({
       id: `round_${roundNumber}`,
@@ -134,12 +156,12 @@ export function generateDefaultRounds(
       trump: getNextSuit(),
       phase: 'bidding',
       scores: {},
-      phaseName: 'Vuelta de 1 carta',
+      phaseName: 'Primera Vuelta (1 carta)',
     });
     roundNumber++;
   }
 
-  // Phase 2: Subida (2, 3, 4 ... hasta maxCards - 1)
+  // Phase 2: Subida (2, 3, 4 ... hasta maxCards - 1 = maxCards - 2 rondas)
   for (let c = 2; c < maxCards; c++) {
     rounds.push({
       id: `round_${roundNumber}`,
@@ -149,70 +171,58 @@ export function generateDefaultRounds(
       trump: getNextSuit(),
       phase: 'bidding',
       scores: {},
-      phaseName: 'Subida',
+      phaseName: `Subida (${c} cartas)`,
     });
     roundNumber++;
   }
 
-  // Phase 3: Subastado (Cartas máximas - El jugador con más bazas elige el triunfo)
+  // Phase 3: Rondas de Máximas (Todas las cartas)
+  // Exact count of max cards hands to reach the target rounds:
+  // Non-max phases = Phase 1 (numPlayers) + Phase 2 (maxCards - 2) + Phase 4 (maxCards - 2) + Phase 5 (numPlayers)
+  const nonMaxRoundsCount = 2 * numPlayers + 2 * Math.max(0, maxCards - 2);
+  const targetTotal = TARGET_ROUNDS_FOR_PLAYERS[numPlayers] || (nonMaxRoundsCount + numPlayers * 2);
+  const maxRoundsCount = Math.max(1, targetTotal - nonMaxRoundsCount);
+
   const enableSubastado = rules?.enableSubastado !== false;
-  if (enableSubastado) {
-    for (let i = 0; i < numPlayers; i++) {
-      rounds.push({
-        id: `round_${roundNumber}`,
-        roundNumber,
-        cards: maxCards,
-        dealerIndex: getNextDealer(),
-        trump: 'oros', // Default until set by highest bidder
-        phase: 'bidding',
-        scores: {},
-        phaseName: `Subastado (${maxCards} cartas)`,
-        isSubastado: true,
-      });
-      roundNumber++;
-    }
-  }
-
-  // Phase 4: Vuelta de Máximas tras Subastado (1 mano completa de maxCards por cada jugador con triunfo aleatorio)
   const enableRandomTrumpMax = rules?.randomTrumpAfterSubastado !== false;
-  if (enableRandomTrumpMax) {
-    for (let i = 0; i < numPlayers; i++) {
+
+  for (let i = 0; i < maxRoundsCount; i++) {
+    let trump: Suit = 'oros';
+    let isSubastado = false;
+    let isRandomTrump = false;
+    let phaseName = `Todas las Cartas (${maxCards} cartas)`;
+
+    // First cycle in max cards is Subastado if enabled
+    if (enableSubastado && i < numPlayers) {
+      isSubastado = true;
+      trump = 'oros';
+      phaseName = `Vuelta Máximas: Subastado (${maxCards} cartas)`;
+    } else if (enableRandomTrumpMax) {
+      isRandomTrump = true;
       const drawnCard = drawRandomCardForTrump();
-      rounds.push({
-        id: `round_${roundNumber}`,
-        roundNumber,
-        cards: maxCards,
-        dealerIndex: getNextDealer(),
-        trump: drawnCard.suit, // Random trump drawn for this dealer
-        phase: 'bidding',
-        scores: {},
-        phaseName: `Máximas - Triunfo Aleatorio (${maxCards} cartas)`,
-        isRandomTrumpMax: true,
-      });
-      roundNumber++;
+      trump = drawnCard.suit;
+      phaseName = `Vuelta Máximas: Triunfo Dador (${maxCards} cartas)`;
+    } else {
+      trump = getNextSuit();
+      phaseName = `Vuelta Máximas (${maxCards} cartas)`;
     }
+
+    rounds.push({
+      id: `round_${roundNumber}`,
+      roundNumber,
+      cards: maxCards,
+      dealerIndex: getNextDealer(),
+      trump,
+      phase: 'bidding',
+      scores: {},
+      phaseName,
+      isSubastado,
+      isRandomTrumpMax: isRandomTrump,
+    });
+    roundNumber++;
   }
 
-  // Phase 5: Máximas con Triunfo Visible (opcional, solo si está explícitamente activada)
-  const enableVisibleTrumpMax = rules?.visibleTrumpAfterSubastado === true;
-  if (enableVisibleTrumpMax) {
-    for (let i = 0; i < numPlayers; i++) {
-      rounds.push({
-        id: `round_${roundNumber}`,
-        roundNumber,
-        cards: maxCards,
-        dealerIndex: getNextDealer(),
-        trump: getNextSuit(),
-        phase: 'bidding',
-        scores: {},
-        phaseName: `Máximas - Triunfo Visible (${maxCards} cartas)`,
-        isVisibleTrumpMax: true,
-      });
-      roundNumber++;
-    }
-  }
-
-  // Phase 5: Bajada (maxCards - 1, ..., 2)
+  // Phase 4: Bajada (Descenso directo: maxCards - 1, ..., 2 = maxCards - 2 rondas)
   for (let c = maxCards - 1; c >= 2; c--) {
     rounds.push({
       id: `round_${roundNumber}`,
@@ -222,12 +232,12 @@ export function generateDefaultRounds(
       trump: getNextSuit(),
       phase: 'bidding',
       scores: {},
-      phaseName: 'Bajada',
+      phaseName: `Bajada (${c} cartas)`,
     });
     roundNumber++;
   }
 
-  // Phase 6: Vuelta final de 1 carta (1 ronda por cada jugador)
+  // Phase 5: Vuelta final de 1 carta (1 mano por cada jugador = numPlayers rondas)
   for (let i = 0; i < numPlayers; i++) {
     rounds.push({
       id: `round_${roundNumber}`,
@@ -237,7 +247,7 @@ export function generateDefaultRounds(
       trump: getNextSuit(),
       phase: 'bidding',
       scores: {},
-      phaseName: 'Vuelta final de 1',
+      phaseName: 'Vuelta Final (1 carta)',
     });
     roundNumber++;
   }
@@ -311,21 +321,48 @@ export function calculateScore(
   const hit = bid === actual;
   const difference = Math.abs(bid - actual);
 
-  // Pocha condition: player makes ALL tricks in round with 4+ cards
-  const isPocha = hit && cards >= 4 && actual === cards && rules.pochaDoubleDouble !== false;
+  // Pocha condition: player bids ALL tricks in round with 4+ cards (cards >= 4 && bid === cards)
+  const isPochaAttempt = cards >= 4 && bid === cards && rules?.pochaDoubleDouble !== false;
+  const isPocha = isPochaAttempt && hit;
+
+  const isOrosDouble = trump === 'oros' && rules?.doubleOros !== false;
+
+  if (isPochaAttempt) {
+    // Base hit value: (5 * cards) + 10
+    // Multiplier: x2 for Pocha bid, and additional x2 if trump is Oros (x4 total in Oros)
+    // Non-Oros 8 cards: (40 + 10) * 2 = 100 pts (+100 hit, -100 fail)
+    // Oros 8 cards: (40 + 10) * 2 * 2 = 200 pts (+200 hit, -200 fail)
+    const baseValue = 5 * cards + 10;
+    const pochaMultiplier = 2 * (isOrosDouble ? 2 : 1);
+    const pochaMagnitude = baseValue * pochaMultiplier;
+    const points = hit ? pochaMagnitude : -pochaMagnitude;
+
+    console.log(
+      `[POCHA SCORE LOG] 🃏 Cards: ${cards} | Bid: ${bid} | Actual: ${actual} | Trump: ${trump} | Hit: ${hit}\n` +
+      `  - Base Value (5*cards + 10): ${baseValue}\n` +
+      `  - Multipliers: Pocha (x2)${isOrosDouble ? ' x Oros (x2) = x4 Total' : ' = x2 Total'}\n` +
+      `  - Calculation: ${baseValue} * ${pochaMultiplier} = ${pochaMagnitude} (${hit ? '+' : '-'}${pochaMagnitude} pts)\n` +
+      `  - Final Points: ${points}`
+    );
+
+    return { points, hit, difference, isPocha };
+  }
 
   let basePoints = 0;
-  if (isPocha) {
-    // Doble del doble: 5 points * cards * 4 (e.g. 5 cards -> 25 * 2 = 50 * 2 = 100 pts)
-    basePoints = 5 * cards * 4;
-  } else if (hit) {
+  if (hit) {
     basePoints = 10 + 5 * bid;
   } else {
     basePoints = -10 - 5 * difference;
   }
 
-  const isDouble = trump === 'oros' && rules.doubleOros;
-  const points = isDouble ? basePoints * 2 : basePoints;
+  const points = isOrosDouble ? basePoints * 2 : basePoints;
+
+  console.log(
+    `[SCORE LOG] 🃏 Cards: ${cards} | Bid: ${bid} | Actual: ${actual} | Trump: ${trump} | Hit: ${hit}\n` +
+    `  - Base Points: ${basePoints} (${hit ? `10 + 5*${bid}` : `-10 - 5*${difference}`})\n` +
+    `  - Oros Double: ${isOrosDouble ? 'Yes (x2)' : 'No'}\n` +
+    `  - Final Points: ${points}`
+  );
 
   return { points, hit, difference, isPocha };
 }

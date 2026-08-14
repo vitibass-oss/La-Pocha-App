@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Player, Round, GameRules } from '../types';
+import { Player, Round, GameRules, Suit } from '../types';
 import { SUITS } from '../utils/pocha';
-import { Edit3, Check, X, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Edit3, Check, X, AlertTriangle, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
 
 interface EditRoundModalProps {
   isOpen: boolean;
@@ -12,8 +12,10 @@ interface EditRoundModalProps {
   initialRoundIndex?: number;
   onSaveRoundScore: (
     roundIndex: number,
-    updatedScores: Record<string, { bid: number; actual: number }>
+    updatedScores: Record<string, { bid: number; actual: number }>,
+    updatedTrump?: Suit
   ) => void;
+  onDeleteRound?: (roundIndex: number) => void;
 }
 
 export const EditRoundModal: React.FC<EditRoundModalProps> = ({
@@ -24,15 +26,22 @@ export const EditRoundModal: React.FC<EditRoundModalProps> = ({
   rules,
   initialRoundIndex = 0,
   onSaveRoundScore,
+  onDeleteRound,
 }) => {
   const [selectedRoundIdx, setSelectedRoundIdx] = useState(initialRoundIndex);
   const [localScores, setLocalScores] = useState<
     Record<string, { bid: number; actual: number }>
   >({});
+  const [selectedTrump, setSelectedTrump] = useState<Suit>('oros');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
-      setSelectedRoundIdx(Math.min(initialRoundIndex, rounds.length - 1));
+      const idx = Math.min(initialRoundIndex, rounds.length - 1);
+      setSelectedRoundIdx(idx);
+      if (rounds[idx]) {
+        setSelectedTrump(rounds[idx].trump);
+      }
     }
   }, [isOpen, initialRoundIndex, rounds.length]);
 
@@ -40,6 +49,7 @@ export const EditRoundModal: React.FC<EditRoundModalProps> = ({
 
   useEffect(() => {
     if (currentRound) {
+      setSelectedTrump(currentRound.trump);
       const initialMap: Record<string, { bid: number; actual: number }> = {};
       players.forEach((p) => {
         const s = currentRound.scores[p.id];
@@ -54,7 +64,7 @@ export const EditRoundModal: React.FC<EditRoundModalProps> = ({
 
   if (!isOpen || !currentRound) return null;
 
-  const suit = SUITS[currentRound.trump];
+  const currentSuit = SUITS[selectedTrump] || SUITS[currentRound.trump];
   const dealer = players[currentRound.dealerIndex] || players[0];
 
   // Calculate sum of actual tricks
@@ -78,7 +88,7 @@ export const EditRoundModal: React.FC<EditRoundModalProps> = ({
   };
 
   const handleSave = () => {
-    onSaveRoundScore(selectedRoundIdx, localScores);
+    onSaveRoundScore(selectedRoundIdx, localScores, selectedTrump);
     onClose();
   };
 
@@ -127,7 +137,7 @@ export const EditRoundModal: React.FC<EditRoundModalProps> = ({
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-1">
-              Repartió: 👑 {dealer.name} • Triunfo: {suit.symbol} {suit.name}
+              Repartió: 👑 {dealer.name}
             </p>
           </div>
 
@@ -138,6 +148,45 @@ export const EditRoundModal: React.FC<EditRoundModalProps> = ({
           >
             <ChevronRight className="w-5 h-5" />
           </button>
+        </div>
+
+        {/* Trump Suit Selector in Edit Round */}
+        <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-black uppercase tracking-wider text-amber-400">
+              Modificar Triunfo de la Ronda
+            </span>
+            <span className="text-xs font-bold text-slate-300">
+              Actual: {currentSuit.symbol} {currentSuit.name} {currentSuit.isDouble ? '(x2)' : ''}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
+            {(Object.keys(SUITS) as Suit[]).map((sKey) => {
+              const s = SUITS[sKey];
+              const isSelected = selectedTrump === sKey;
+              return (
+                <button
+                  key={sKey}
+                  type="button"
+                  onClick={() => setSelectedTrump(sKey)}
+                  className={`py-2 px-2 rounded-lg border text-xs font-black flex items-center justify-center space-x-1.5 transition cursor-pointer ${
+                    isSelected
+                      ? `${s.bgColor} ${s.color} ${s.borderColor} ring-2 ring-amber-400 scale-[1.03] shadow-md`
+                      : 'bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800 hover:text-white'
+                  }`}
+                >
+                  <span className="text-sm">{s.symbol}</span>
+                  <span>{s.name}</span>
+                  {s.isDouble && (
+                    <span className="text-[9px] bg-amber-500 text-slate-950 px-1 rounded font-black">
+                      x2
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* Validation indicator */}
@@ -282,22 +331,73 @@ export const EditRoundModal: React.FC<EditRoundModalProps> = ({
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center space-x-3 pt-3 border-t border-slate-800">
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition text-sm cursor-pointer"
-          >
-            Cancelar
-          </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            className="flex-1 py-3 bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black rounded-xl transition text-sm shadow-lg shadow-amber-500/20 flex items-center justify-center space-x-2 cursor-pointer"
-          >
-            <Check className="w-4 h-4" />
-            <span>Guardar y Recalcular</span>
-          </button>
+        <div className="space-y-3 pt-3 border-t border-slate-800">
+          {showDeleteConfirm ? (
+            <div className="bg-red-950/40 border border-red-500/40 p-3.5 rounded-xl space-y-2.5">
+              <div className="flex items-center space-x-2 text-red-400 text-xs font-bold">
+                <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                <span>¿Seguro que deseas eliminar la Ronda {currentRound.roundNumber} ({currentRound.cards} {currentRound.cards === 1 ? 'carta' : 'cartas'})?</span>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Esta acción borrará esta mano de la partida y reordenará las rondas restantes automáticamente.
+              </p>
+              <div className="flex items-center space-x-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteConfirm(false)}
+                  className="flex-1 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-lg text-xs transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onDeleteRound) {
+                      onDeleteRound(selectedRoundIdx);
+                    }
+                    setShowDeleteConfirm(false);
+                    onClose();
+                  }}
+                  className="flex-1 py-1.5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-lg text-xs transition cursor-pointer flex items-center justify-center space-x-1"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Sí, Eliminar Ronda</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-3">
+              {onDeleteRound && rounds.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteConfirm(true)}
+                  className="py-2.5 px-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-xl transition text-xs font-bold flex items-center space-x-1.5 cursor-pointer shrink-0"
+                  title="Eliminar esta ronda de la partida"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span className="hidden sm:inline">Eliminar Ronda</span>
+                </button>
+              )}
+
+              <div className="flex items-center space-x-2 flex-1 justify-end">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition text-xs sm:text-sm cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSave}
+                  className="py-2.5 px-4 bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black rounded-xl transition text-xs sm:text-sm shadow-lg shadow-amber-500/20 flex items-center justify-center space-x-1.5 cursor-pointer"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Guardar y Recalcular</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
