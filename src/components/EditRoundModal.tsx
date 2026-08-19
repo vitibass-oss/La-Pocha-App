@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Player, Round, GameRules, Suit } from '../types';
-import { SUITS } from '../utils/pocha';
-import { Edit3, Check, X, AlertTriangle, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
+import { SUITS, calculateBiddingStatus } from '../utils/pocha';
+import { Edit3, Check, X, AlertTriangle, ChevronLeft, ChevronRight, Trash2, Calculator, ShieldAlert } from 'lucide-react';
 
 interface EditRoundModalProps {
   isOpen: boolean;
@@ -67,9 +67,21 @@ export const EditRoundModal: React.FC<EditRoundModalProps> = ({
   const currentSuit = SUITS[selectedTrump] || SUITS[currentRound.trump];
   const dealer = players[currentRound.dealerIndex] || players[0];
 
-  // Calculate sum of actual tricks
+  // Calculate sum of actual tricks and bidding analysis
   const totalActuals = Object.values(localScores).reduce((acc: number, curr: { bid: number; actual: number }) => acc + (curr.actual || 0), 0);
   const tricksMatch = totalActuals === currentRound.cards;
+
+  const currentBidsMap = Object.fromEntries(
+    Object.entries(localScores).map(([pId, val]) => [pId, val.bid])
+  );
+
+  const biddingAnalysis = calculateBiddingStatus(
+    currentRound.cards,
+    currentBidsMap,
+    players,
+    currentRound.dealerIndex,
+    rules
+  );
 
   const handleBidChange = (playerId: string, delta: number) => {
     setLocalScores((prev) => {
@@ -189,29 +201,63 @@ export const EditRoundModal: React.FC<EditRoundModalProps> = ({
           </div>
         </div>
 
-        {/* Validation indicator */}
-        <div
-          className={`p-3 rounded-xl border flex items-center justify-between text-xs font-bold ${
-            tricksMatch
-              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-              : 'bg-amber-500/10 border-amber-500/30 text-amber-300'
-          }`}
-        >
-          <div className="flex items-center space-x-2">
-            {tricksMatch ? (
-              <Check className="w-4 h-4 text-emerald-400 shrink-0" />
-            ) : (
-              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-            )}
-            <span>
-              Total bazas hechas: {totalActuals} de {currentRound.cards} posibles
-            </span>
+        {/* Validation indicators: Bidding & Actuals */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          {/* Bidding validation card */}
+          <div
+            className={`p-3 rounded-xl border text-xs space-y-1 ${
+              biddingAnalysis.hasIndividualInvalidBids || biddingAnalysis.isDealerForbiddenViolated
+                ? 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                : biddingAnalysis.bidsStatus === 'under'
+                ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                : biddingAnalysis.bidsStatus === 'over'
+                ? 'bg-purple-500/10 border-purple-500/30 text-purple-300'
+                : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+            }`}
+          >
+            <div className="flex items-center justify-between font-bold">
+              <span className="flex items-center space-x-1.5">
+                <Calculator className="w-4 h-4" />
+                <span>Bazas Pedidas:</span>
+              </span>
+              <span className="font-black text-white">
+                {biddingAnalysis.totalBids} / {currentRound.cards}
+              </span>
+            </div>
+            <p className="text-[11px] opacity-90">
+              {biddingAnalysis.hasIndividualInvalidBids
+                ? '⚠️ Hay apuestas imposibles (> cartas)'
+                : biddingAnalysis.isDealerForbiddenViolated
+                ? `🚫 Prohibido: Repartidor no puede pedir ${biddingAnalysis.forbiddenDealerBid}`
+                : biddingAnalysis.bidsStatus === 'under'
+                ? `Faltan ${biddingAnalysis.differenceAbs} bazas por pedir`
+                : biddingAnalysis.bidsStatus === 'over'
+                ? `+${biddingAnalysis.differenceAbs} bazas de más`
+                : 'Suma exacta'}
+            </p>
           </div>
-          {!tricksMatch && (
-            <span className="text-[10px] text-amber-300/80 font-normal hidden sm:inline">
-              (Asegúrate de repartir las {currentRound.cards} bazas de la mano)
-            </span>
-          )}
+
+          {/* Actuals validation card */}
+          <div
+            className={`p-3 rounded-xl border text-xs space-y-1 ${
+              tricksMatch
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+            }`}
+          >
+            <div className="flex items-center justify-between font-bold">
+              <span className="flex items-center space-x-1.5">
+                {tricksMatch ? <Check className="w-4 h-4 text-emerald-400" /> : <AlertTriangle className="w-4 h-4 text-rose-400" />}
+                <span>Bazas Hechas:</span>
+              </span>
+              <span className="font-black text-white">
+                {totalActuals} / {currentRound.cards}
+              </span>
+            </div>
+            <p className="text-[11px] opacity-90">
+              {tricksMatch ? '✓ Cuadre perfecto con las cartas' : `Deben sumar exactamente ${currentRound.cards} bazas`}
+            </p>
+          </div>
         </div>
 
         {/* Players Score Inputs Table */}

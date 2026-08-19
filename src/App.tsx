@@ -4,6 +4,8 @@ import {
   generateDefaultRounds,
   recalculateGameScores,
   calculatePlayerStats,
+  adaptRoundsForNewPlayerCount,
+  reorderGamePlayers,
 } from './utils/pocha';
 import {
   saveCompletedGame,
@@ -23,36 +25,41 @@ import { GameSummaryModal } from './components/GameSummaryModal';
 import { DownloadAppModal } from './components/DownloadAppModal';
 import { AddPlayerModal } from './components/AddPlayerModal';
 import { EditRoundModal } from './components/EditRoundModal';
+import { ReorderPlayersModal } from './components/ReorderPlayersModal';
 import { SavedGamesModal } from './components/SavedGamesModal';
 import { Trophy, Play, BarChart3, RotateCcw, AlertTriangle, FolderArchive } from 'lucide-react';
-
-const STORAGE_KEY = 'pocha_game_v2';
+import {
+  getSafeStorage,
+  STORAGE_KEYS,
+  sanitizeGame,
+  saveGameRoundSnapshot,
+  getLatestGameSnapshot,
+  clearGameSnapshots,
+} from './utils/safeBoot';
 
 export default function App() {
   const [game, setGame] = useState<Game | null>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
+      const storage = getSafeStorage();
+      const saved = storage.getItem(STORAGE_KEYS.GAME);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (
-          parsed &&
-          Array.isArray(parsed.players) &&
-          parsed.players.length > 0 &&
-          Array.isArray(parsed.rounds) &&
-          parsed.rounds.length > 0
-        ) {
-          parsed.currentRoundIndex = Math.max(
-            0,
-            Math.min(parsed.rounds.length - 1, parsed.currentRoundIndex || 0)
-          );
-          return parsed;
-        }
+        const sanitized = sanitizeGame(parsed);
+        if (sanitized) return sanitized;
+      }
+
+      // Redundant Snapshot Backup Fallback
+      const snapshot = getLatestGameSnapshot();
+      if (snapshot?.gameState) {
+        console.info('Restored game from snapshot backup on boot');
+        return snapshot.gameState;
       }
     } catch (e) {
-      console.error('Failed to load saved game:', e);
+      console.error('Failed to load saved game in App component:', e);
       try {
-        localStorage.removeItem(STORAGE_KEY);
-      } catch (err) {}
+        const snapshot = getLatestGameSnapshot();
+        if (snapshot?.gameState) return snapshot.gameState;
+      } catch (_) {}
     }
     return null;
   });
@@ -68,22 +75,24 @@ export default function App() {
   const [showSummaryModal, setShowSummaryModal] = useState(false);
   const [showDownloadModal, setShowDownloadModal] = useState(false);
   const [showAddPlayerModal, setShowAddPlayerModal] = useState(false);
+  const [showReorderPlayersModal, setShowReorderPlayersModal] = useState(false);
   const [showEditRoundModal, setShowEditRoundModal] = useState(false);
   const [showSavedGamesModal, setShowSavedGamesModal] = useState(false);
   const [editRoundIndex, setEditRoundIndex] = useState(0);
   const [showNewGameConfirmModal, setShowNewGameConfirmModal] = useState(false);
   const [showResetRoundConfirmModal, setShowResetRoundConfirmModal] = useState(false);
 
-  // Auto save game state to localStorage
+  // Auto save game state to safe storage
   useEffect(() => {
     try {
+      const storage = getSafeStorage();
       if (game) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(game));
+        storage.setItem(STORAGE_KEYS.GAME, JSON.stringify(game));
       } else {
-        localStorage.removeItem(STORAGE_KEY);
+        storage.removeItem(STORAGE_KEYS.GAME);
       }
     } catch (e) {
-      console.error('Error with localStorage:', e);
+      console.error('Error with safe storage persistence:', e);
     }
   }, [game]);
 
@@ -104,8 +113,10 @@ export default function App() {
       name: `Partida de ${players.length} jugadores`,
     };
 
+    clearGameSnapshots();
     setGame(newGame);
     setShowSummaryModal(false);
+    saveGameRoundSnapshot(newGame, 0);
   };
 
   // Update Bids for current round
@@ -188,6 +199,8 @@ export default function App() {
     };
 
     setGame(updatedGame);
+    // Persist snapshot checkpoint upon round completion
+    saveGameRoundSnapshot(updatedGame, currentIdx);
 
     if (isFinished) {
       const finalStats = calculatePlayerStats(game.players, recalculated);
@@ -245,18 +258,90 @@ export default function App() {
     setGame({ ...game, rounds: recalculated });
   };
 
-  // Add new player mid-game
-  const handleAddPlayer = (newPlayer: Player) => {
+  // Add new player mid-game with insertion after dealer and round table adaptation
+  const handleAddPlayer = (
+    newPlayer: Player,
+    insertPosition?: number,
+    recalculateRoundTable: boolean = true,
+    customOrderedPlayers?: Player[]
+  ) => {
     if (!game) return;
-    const updatedPlayers = [...game.players, newPlayer];
-    const recalculated = recalculateGameScores(updatedPlayers, game.rounds, game.rules);
 
-    setGame({
+    const currentRound = game.rounds[game.currentRoundIndex];
+    const dealerIdx = currentRound
+      ? currentRound.dealerIndex % game.players.length
+      : 0;
+
+    // Default position is immediately after the dealer
+    const pos =
+      insertPosition !== undefined
+        ? Math.max(0, Math.min(game.players.length, insertPosition))
+        : dealerIdx + 1;
+
+    // Use custom ordered players if supplied by seating table, else standard insertion
+    const updatedPlayers =
+      customOrderedPlayers && customOrderedPlayers.length === game.players.length + 1
+        ? customOrderedPlayers
+        : [
+            ...game.players.slice(0, pos),
+            newPlayer,
+            ...game.players.slice(pos),
+          ];
+
+    let updatedRounds: Round[];
+    if (recalculateRoundTable) {
+      updatedRounds = adaptRoundsForNewPlayerCount(
+        game.rounds,
+        game.currentRoundIndex,
+        game.players,
+        updatedPlayers,
+        game.rules,
+        game.rules.deckCards || 40
+      );
+    } else {
+      updatedRounds = recalculateGameScores(
+        updatedPlayers,
+        game.rounds,
+        game.rules
+      );
+    }
+
+    const updatedGame: Game = {
       ...game,
       players: updatedPlayers,
-      rounds: recalculated,
+      rounds: updatedRounds,
       updatedAt: new Date().toISOString(),
-    });
+    };
+
+    setGame(updatedGame);
+    saveGameRoundSnapshot(updatedGame, game.currentRoundIndex);
+  };
+
+  // Reorder players physically around the table
+  const handleReorderPlayers = (
+    newPlayersOrder: Player[],
+    rotateFutureDealers: boolean = true
+  ) => {
+    if (!game) return;
+
+    const result = reorderGamePlayers(
+      game.rounds,
+      game.currentRoundIndex,
+      game.players,
+      newPlayersOrder,
+      game.rules,
+      rotateFutureDealers
+    );
+
+    const updatedGame: Game = {
+      ...game,
+      players: result.players,
+      rounds: result.rounds,
+      updatedAt: new Date().toISOString(),
+    };
+
+    setGame(updatedGame);
+    saveGameRoundSnapshot(updatedGame, game.currentRoundIndex);
   };
 
   // Bulk save round scores and trump from EditRoundModal
@@ -298,7 +383,13 @@ export default function App() {
     updatedRounds[roundIndex] = targetRound;
 
     const recalculated = recalculateGameScores(game.players, updatedRounds, game.rules);
-    setGame({ ...game, rounds: recalculated });
+    const updatedGame = {
+      ...game,
+      rounds: recalculated,
+      updatedAt: new Date().toISOString(),
+    };
+    setGame(updatedGame);
+    saveGameRoundSnapshot(updatedGame, roundIndex);
   };
 
   // Delete a round dynamically from the active game
@@ -320,12 +411,14 @@ export default function App() {
     }
 
     const recalculated = recalculateGameScores(game.players, reindexedRounds, game.rules);
-    setGame({
+    const updatedGame = {
       ...game,
       rounds: recalculated,
       currentRoundIndex: nextCurrentIdx,
       updatedAt: new Date().toISOString(),
-    });
+    };
+    setGame(updatedGame);
+    saveGameRoundSnapshot(updatedGame, nextCurrentIdx);
   };
 
   // Confirm Reset Current Round
@@ -362,6 +455,9 @@ export default function App() {
     ? Math.min(Math.max(0, game.currentRoundIndex), game.rounds.length - 1)
     : 0;
   const currentRound = game && game.rounds.length > 0 ? game.rounds[validRoundIdx] : null;
+  const completedRoundsCount = game
+    ? game.rounds.filter((r) => r.phase === 'completed').length
+    : 0;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-950">
@@ -383,6 +479,8 @@ export default function App() {
         isGameActive={!!game}
         currentRoundNum={currentRound ? currentRound.roundNumber : undefined}
         totalRoundsNum={game ? game.rounds.length : undefined}
+        completedRoundsNum={completedRoundsCount}
+        currentRoundCards={currentRound ? currentRound.cards : undefined}
       />
 
       {/* Main Content Area */}
@@ -412,6 +510,7 @@ export default function App() {
                     onChangeTrump={handleChangeTrump}
                     onOpenVoiceModal={handleOpenVoiceModal}
                     onOpenAddPlayerModal={() => setShowAddPlayerModal(true)}
+                    onOpenReorderPlayersModal={() => setShowReorderPlayersModal(true)}
                     onOpenEditRoundModal={() => {
                       setEditRoundIndex(game.currentRoundIndex);
                       setShowEditRoundModal(true);
@@ -426,6 +525,7 @@ export default function App() {
                   stats={stats}
                   currentRound={currentRound || undefined}
                   onOpenAddPlayerModal={() => setShowAddPlayerModal(true)}
+                  onOpenReorderPlayersModal={() => setShowReorderPlayersModal(true)}
                 />
 
                 {/* Quick Finish Match Button */}
@@ -498,7 +598,11 @@ export default function App() {
         />
       )}
 
-      <RulesModal isOpen={showRulesModal} onClose={() => setShowRulesModal(false)} />
+      <RulesModal
+        isOpen={showRulesModal}
+        onClose={() => setShowRulesModal(false)}
+        rules={game?.rules}
+      />
 
       <DownloadAppModal isOpen={showDownloadModal} onClose={() => setShowDownloadModal(false)} />
 
@@ -509,7 +613,19 @@ export default function App() {
           existingPlayers={game.players}
           stats={stats}
           currentRoundIndex={game.currentRoundIndex}
+          currentRound={game.rounds[game.currentRoundIndex]}
+          deckCards={game.rules?.deckCards || 40}
           onAddPlayer={handleAddPlayer}
+        />
+      )}
+
+      {game && (
+        <ReorderPlayersModal
+          isOpen={showReorderPlayersModal}
+          onClose={() => setShowReorderPlayersModal(false)}
+          players={game.players}
+          currentRound={game.rounds[game.currentRoundIndex]}
+          onSaveOrder={handleReorderPlayers}
         />
       )}
 
@@ -530,7 +646,14 @@ export default function App() {
         <GameSummaryModal
           isOpen={showSummaryModal}
           stats={stats}
+          game={game}
+          rounds={game.rounds}
+          players={game.players}
           onClose={() => setShowSummaryModal(false)}
+          onOpenStats={() => {
+            setShowSummaryModal(false);
+            setShowStatsModal(true);
+          }}
           onNewGame={() => {
             setGame(null);
             setShowSummaryModal(false);

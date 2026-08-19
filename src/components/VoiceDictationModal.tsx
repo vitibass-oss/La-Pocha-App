@@ -28,67 +28,61 @@ export const VoiceDictationModal: React.FC<VoiceDictationModalProps> = ({
   const shouldListenRef = useRef<boolean>(false);
 
   useEffect(() => {
+    let recInstance: any = null;
+
     if (typeof window !== 'undefined' && isOpen) {
       const SpeechRecognition =
         (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
       if (SpeechRecognition) {
-        const rec = new SpeechRecognition();
-        rec.continuous = true;
-        rec.interimResults = true;
-        rec.lang = 'es-ES';
+        try {
+          const rec = new SpeechRecognition();
+          rec.continuous = false;
+          rec.interimResults = true;
+          rec.lang = 'es-ES';
 
-        rec.onstart = () => {
-          setIsListening(true);
-        };
+          rec.onstart = () => {
+            setIsListening(true);
+          };
 
-        rec.onend = () => {
-          // If user hasn't manually stopped, restart to stay open continuously
-          if (shouldListenRef.current) {
-            try {
-              rec.start();
-            } catch (err) {
-              console.log('Error restarting recognition:', err);
-              setIsListening(false);
+          rec.onend = () => {
+            setIsListening(false);
+            shouldListenRef.current = false;
+          };
+
+          rec.onerror = (e: any) => {
+            console.warn('Speech recognition status:', e?.error);
+            setIsListening(false);
+            shouldListenRef.current = false;
+          };
+
+          rec.onresult = (event: any) => {
+            let transcript = '';
+            for (let i = 0; i < event.results.length; i++) {
+              transcript += event.results[i][0].transcript + ' ';
             }
-          } else {
-            setIsListening(false);
-          }
-        };
+            setSpokenText(transcript);
+            const { parsedScores: parsed } = parseVoiceInput(transcript, players);
+            setParsedScores((prev) => ({ ...prev, ...parsed }));
+          };
 
-        rec.onerror = (e: any) => {
-          console.error('Speech recognition error:', e);
-          if (e.error === 'no-speech' && shouldListenRef.current) {
-            // Keep listening on silence error
-            try {
-              rec.start();
-            } catch (err) {}
-          } else {
-            setIsListening(false);
-          }
-        };
-
-        rec.onresult = (event: any) => {
-          let transcript = '';
-          for (let i = 0; i < event.results.length; i++) {
-            transcript += event.results[i][0].transcript + ' ';
-          }
-          setSpokenText(transcript);
-          const { parsedScores: parsed } = parseVoiceInput(transcript, players);
-          setParsedScores((prev) => ({ ...prev, ...parsed }));
-        };
-
-        recognitionRef.current = rec;
+          recognitionRef.current = rec;
+          recInstance = rec;
+        } catch (e) {
+          console.warn('Failed to initialize speech recognition:', e);
+        }
       }
     }
 
     return () => {
       shouldListenRef.current = false;
-      if (recognitionRef.current) {
+      if (recInstance) {
         try {
-          recognitionRef.current.stop();
+          recInstance.abort();
         } catch (e) {}
       }
+      recognitionRef.current = null;
+      setIsListening(false);
     };
   }, [isOpen, players]);
 
@@ -112,7 +106,8 @@ export const VoiceDictationModal: React.FC<VoiceDictationModalProps> = ({
       try {
         recognitionRef.current.start();
       } catch (e) {
-        console.error('Start error:', e);
+        console.warn('Start speech error:', e);
+        setIsListening(false);
       }
     }
   };

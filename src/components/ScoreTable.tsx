@@ -214,12 +214,12 @@ export const ScoreTable: React.FC<ScoreTableProps> = ({
                               </button>
                             </div>
                           </div>
-                        ) : isCompleted && score?.bid !== null && score?.actual !== null ? (
+                        ) : isCompleted && score && score.bid !== null && score.bid !== undefined && score.actual !== null && score.actual !== undefined ? (
                           /* Render Completed Score Cell */
                           <div
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleStartEdit(rIdx, player, score.bid || 0, score.actual || 0);
+                              handleStartEdit(rIdx, player, score.bid ?? 0, score.actual ?? 0);
                             }}
                             className="group flex flex-col items-center justify-center p-1 rounded hover:bg-slate-800 transition"
                             title="Haz clic para corregir este resultado"
@@ -248,15 +248,15 @@ export const ScoreTable: React.FC<ScoreTableProps> = ({
                               <div className="flex items-center space-x-1.5">
                                 <span
                                   className={`text-xs font-black px-1.5 py-0.2 rounded ${
-                                    score.points >= 0
+                                    (score.points ?? 0) >= 0
                                       ? 'bg-emerald-500/15 text-emerald-400'
                                       : 'bg-rose-500/15 text-rose-400'
                                   }`}
                                 >
-                                  {score.points >= 0 ? `+${score.points}` : score.points}
+                                  {(score.points ?? 0) >= 0 ? `+${score.points ?? 0}` : score.points}
                                 </span>
                                 <span className="text-[11px] text-slate-300 font-bold">
-                                  ({score.accumulatedPoints})
+                                  ({score.accumulatedPoints ?? 0})
                                 </span>
                               </div>
                             </div>

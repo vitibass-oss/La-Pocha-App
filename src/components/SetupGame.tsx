@@ -3,7 +3,7 @@ import { GameRules, Player } from '../types';
 import { PLAYER_AVATARS, PLAYER_COLORS, getDefaultDeckForPlayers, TARGET_ROUNDS_FOR_PLAYERS } from '../utils/pocha';
 import { RecentWinner } from '../utils/history';
 import { RecentWinnersBoard } from './RecentWinnersBoard';
-import { Users, Settings, Play, Sparkles, Check, HelpCircle, Mic, MicOff, FolderArchive } from 'lucide-react';
+import { Users, Settings, Play, Sparkles, Check, HelpCircle, Mic, MicOff, FolderArchive, GripVertical, ChevronUp, ChevronDown, ArrowRight, Shuffle } from 'lucide-react';
 
 interface SetupGameProps {
   onStartGame: (players: Player[], rules: GameRules) => void;
@@ -52,6 +52,9 @@ export const SetupGame: React.FC<SetupGameProps> = ({
       singleMaxCardsRound: true,
       randomTrumpAfterSubastado: true,
       visibleTrumpAfterSubastado: false,
+      zeroBidRule: 'standard',
+      zeroBidCustomPoints: 10,
+      zeroBidFailPenalty: 'standard',
     };
   });
 
@@ -94,85 +97,83 @@ export const SetupGame: React.FC<SetupGameProps> = ({
 
     // Stop existing if any
     if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch (e) {}
+      try { recognitionRef.current.abort(); } catch (e) {}
     }
 
     setVoiceTargetIndex(target);
     setVoiceSpokenText('');
     shouldListenRef.current = true;
 
-    const rec = new SpeechRecognition();
-    rec.continuous = true;
-    rec.interimResults = true;
-    rec.lang = 'es-ES';
+    try {
+      const rec = new SpeechRecognition();
+      rec.continuous = false;
+      rec.interimResults = true;
+      rec.lang = 'es-ES';
 
-    rec.onstart = () => {
-      setIsListeningVoice(true);
-    };
+      rec.onstart = () => {
+        setIsListeningVoice(true);
+      };
 
-    rec.onend = () => {
-      if (shouldListenRef.current) {
-        try { rec.start(); } catch (e) { setIsListeningVoice(false); }
-      } else {
+      rec.onend = () => {
         setIsListeningVoice(false);
         setVoiceTargetIndex(null);
-      }
-    };
+        shouldListenRef.current = false;
+      };
 
-    rec.onerror = (e: any) => {
-      console.log('Voice error:', e);
-      if (e.error === 'no-speech' && shouldListenRef.current) {
-        try { rec.start(); } catch (err) {}
-      } else {
+      rec.onerror = (e: any) => {
+        console.warn('Voice error:', e?.error);
         setIsListeningVoice(false);
-      }
-    };
+        setVoiceTargetIndex(null);
+        shouldListenRef.current = false;
+      };
 
-    rec.onresult = (event: any) => {
-      let transcript = '';
-      for (let i = 0; i < event.results.length; i++) {
-        transcript += event.results[i][0].transcript + ' ';
-      }
-      const cleaned = transcript.trim();
-      setVoiceSpokenText(cleaned);
+      rec.onresult = (event: any) => {
+        let transcript = '';
+        for (let i = 0; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript + ' ';
+        }
+        const cleaned = transcript.trim();
+        setVoiceSpokenText(cleaned);
 
-      if (target === 'all') {
-        // Split names by comma, 'y', 'con', spaces or 'jugador'
-        const rawNames = cleaned
-          .replace(/jugador \d+/gi, '')
-          .split(/[,;\n\t]|(?:\s+y\s+)|(?:\s+e\s+)/i)
-          .map((s) => s.trim())
-          .filter((s) => s.length > 0);
+        if (target === 'all') {
+          // Split names by comma, 'y', 'con', spaces or 'jugador'
+          const rawNames = cleaned
+            .replace(/jugador \d+/gi, '')
+            .split(/[,;\n\t]|(?:\s+y\s+)|(?:\s+e\s+)/i)
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0);
 
-        if (rawNames.length > 0) {
-          setPlayerList((prev) => {
-            const copy = [...prev];
-            rawNames.forEach((name, i) => {
-              if (i < numPlayers) {
-                const formattedName = name.charAt(0).toUpperCase() + name.slice(1);
-                copy[i].name = formattedName;
-              }
+          if (rawNames.length > 0) {
+            setPlayerList((prev) => {
+              const copy = [...prev];
+              rawNames.forEach((name, i) => {
+                if (i < numPlayers) {
+                  const formattedName = name.charAt(0).toUpperCase() + name.slice(1);
+                  copy[i].name = formattedName;
+                }
+              });
+              return copy;
             });
-            return copy;
-          });
+          }
+        } else if (typeof target === 'number') {
+          if (cleaned) {
+            const formattedName = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+            setPlayerList((prev) => {
+              const copy = [...prev];
+              copy[target].name = formattedName;
+              return copy;
+            });
+          }
         }
-      } else if (typeof target === 'number') {
-        if (cleaned) {
-          const formattedName = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
-          setPlayerList((prev) => {
-            const copy = [...prev];
-            copy[target].name = formattedName;
-            return copy;
-          });
-        }
-      }
-    };
+      };
 
-    recognitionRef.current = rec;
-    try {
+      recognitionRef.current = rec;
       rec.start();
     } catch (err) {
-      console.error('Rec start error:', err);
+      console.warn('Rec start error:', err);
+      setIsListeningVoice(false);
+      setVoiceTargetIndex(null);
+      shouldListenRef.current = false;
     }
   };
 
@@ -180,13 +181,27 @@ export const SetupGame: React.FC<SetupGameProps> = ({
     return () => {
       shouldListenRef.current = false;
       if (recognitionRef.current) {
-        try { recognitionRef.current.stop(); } catch (e) {}
+        try { recognitionRef.current.abort(); } catch (e) {}
       }
+      recognitionRef.current = null;
+      setIsListeningVoice(false);
     };
   }, []);
 
   const handleDeckCardsChange = (cardsCount: number) => {
     setRules((prev) => ({ ...prev, deckCards: cardsCount }));
+  };
+
+  const [draggedPlayerIndex, setDraggedPlayerIndex] = useState<number | null>(null);
+
+  const movePlayerInList = (fromIndex: number, toIndex: number) => {
+    if (toIndex < 0 || toIndex >= numPlayers || fromIndex === toIndex) return;
+    setPlayerList((prev) => {
+      const copy = [...prev];
+      const [moved] = copy.splice(fromIndex, 1);
+      copy.splice(toIndex, 0, moved);
+      return copy;
+    });
   };
 
   const handleNameChange = (index: number, name: string) => {
@@ -365,13 +380,13 @@ export const SetupGame: React.FC<SetupGameProps> = ({
             </section>
           </div>
 
-          {/* 3. Lista de Jugadores */}
+          {/* 3. Lista de Jugadores & Posición en Mesa */}
           <section className="space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div className="flex items-center space-x-2 text-yellow-500 font-bold">
                 <Sparkles className="w-5 h-5 text-yellow-500" />
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-                  3. Nombres de los Jugadores
+                  3. Nombres y Orden en la Mesa
                 </h3>
               </div>
 
@@ -400,16 +415,59 @@ export const SetupGame: React.FC<SetupGameProps> = ({
               </p>
             )}
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 text-xs text-slate-400 flex items-center justify-between">
+              <span className="flex items-center space-x-1.5 text-slate-300">
+                <GripVertical className="w-4 h-4 text-amber-400" />
+                <span>Arrastra o pulsa las flechas para ordenar según estén sentados en la mesa.</span>
+              </span>
+              <span className="text-[11px] text-amber-400/90 font-bold hidden sm:inline">
+                Jugador 1 da cartas en Ronda 1
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {playerList.slice(0, numPlayers).map((p, idx) => {
                 const isThisPlayerMicActive = isListeningVoice && voiceTargetIndex === idx;
+                const isDragging = draggedPlayerIndex === idx;
+
                 return (
                   <div
                     key={idx}
-                    className={`bg-slate-900/60 border rounded-xl p-3.5 flex items-center space-x-3 transition ${
-                      isThisPlayerMicActive ? 'border-amber-500 ring-1 ring-amber-500' : 'border-slate-800 hover:border-slate-700'
+                    draggable
+                    onDragStart={(e) => {
+                      setDraggedPlayerIndex(idx);
+                      e.dataTransfer.effectAllowed = 'move';
+                      e.dataTransfer.setData('text/plain', `${idx}`);
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      if (draggedPlayerIndex !== null && draggedPlayerIndex !== idx) {
+                        movePlayerInList(draggedPlayerIndex, idx);
+                      }
+                      setDraggedPlayerIndex(null);
+                    }}
+                    onDragEnd={() => setDraggedPlayerIndex(null)}
+                    className={`bg-slate-900/80 border rounded-xl p-3 flex items-center space-x-2.5 transition select-none ${
+                      isDragging
+                        ? 'border-amber-500 ring-2 ring-amber-500 bg-amber-500/10 scale-[1.02]'
+                        : isThisPlayerMicActive
+                        ? 'border-amber-500 ring-1 ring-amber-500'
+                        : 'border-slate-800 hover:border-slate-700'
                     }`}
                   >
+                    {/* Drag Handle & Seat Number */}
+                    <div
+                      className="flex flex-col items-center justify-center text-slate-500 hover:text-amber-400 cursor-grab active:cursor-grabbing shrink-0"
+                      title="Arrastrar para reordenar"
+                    >
+                      <GripVertical className="w-4 h-4" />
+                      <span className="text-[9px] font-black text-slate-400 mt-0.5">#{idx + 1}</span>
+                    </div>
+
+                    {/* Avatar button */}
                     <button
                       type="button"
                       onClick={() => {
@@ -417,7 +475,7 @@ export const SetupGame: React.FC<SetupGameProps> = ({
                           (PLAYER_AVATARS.indexOf(p.avatar) + 1) % PLAYER_AVATARS.length;
                         handleAvatarChange(idx, PLAYER_AVATARS[nextAvatarIdx]);
                       }}
-                      className="w-10 h-10 rounded-xl flex items-center justify-center text-xl bg-slate-800 hover:bg-slate-700 transition border border-slate-700 cursor-pointer shrink-0"
+                      className="w-9 h-9 rounded-xl flex items-center justify-center text-lg bg-slate-800 hover:bg-slate-700 transition border border-slate-700 cursor-pointer shrink-0"
                       title="Cambiar avatar"
                     >
                       {p.avatar}
@@ -425,8 +483,8 @@ export const SetupGame: React.FC<SetupGameProps> = ({
 
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between mb-0.5">
-                        <label className="text-[10px] uppercase font-bold tracking-wider text-slate-500 block">
-                          Jugador {idx + 1}
+                        <label className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block truncate">
+                          {idx === 0 ? '👑 Dador inicial (R1)' : `Jugador ${idx + 1}`}
                         </label>
                         {/* Mic per player */}
                         <button
@@ -448,19 +506,42 @@ export const SetupGame: React.FC<SetupGameProps> = ({
                         value={p.name}
                         onChange={(e) => handleNameChange(idx, e.target.value)}
                         placeholder={`Jugador ${idx + 1}`}
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-yellow-500 rounded-lg px-3 py-1.5 text-sm font-bold text-white placeholder-slate-600 outline-none transition"
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-yellow-500 rounded-lg px-2.5 py-1 text-sm font-bold text-white placeholder-slate-600 outline-none transition"
                         required
                       />
                     </div>
 
-                    <div className="flex flex-wrap gap-1 w-12 justify-end shrink-0">
-                      {PLAYER_COLORS.slice(0, 4).map((c) => (
+                    {/* Move Up/Down Quick Controls */}
+                    <div className="flex flex-col space-y-0.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => movePlayerInList(idx, idx - 1)}
+                        disabled={idx === 0}
+                        className="p-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-20 disabled:pointer-events-none text-slate-300 hover:text-white transition cursor-pointer"
+                        title="Mover antes en la mesa"
+                      >
+                        <ChevronUp className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => movePlayerInList(idx, idx + 1)}
+                        disabled={idx === numPlayers - 1}
+                        className="p-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-20 disabled:pointer-events-none text-slate-300 hover:text-white transition cursor-pointer"
+                        title="Mover después en la mesa"
+                      >
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {/* Color Swatches */}
+                    <div className="flex flex-col gap-1 w-5 justify-center shrink-0">
+                      {PLAYER_COLORS.slice(0, 3).map((c) => (
                         <button
                           key={c}
                           type="button"
                           onClick={() => handleColorChange(idx, c)}
-                          className={`w-4 h-4 rounded-full transition cursor-pointer ${
-                            p.color === c ? 'ring-2 ring-white scale-110' : 'opacity-60 hover:opacity-100'
+                          className={`w-3.5 h-3.5 rounded-full transition cursor-pointer ${
+                            p.color === c ? 'ring-2 ring-white scale-110' : 'opacity-50 hover:opacity-100'
                           }`}
                           style={{ backgroundColor: c }}
                         />
@@ -469,6 +550,34 @@ export const SetupGame: React.FC<SetupGameProps> = ({
                   </div>
                 );
               })}
+            </div>
+
+            {/* Seating Table Flow Preview */}
+            <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 space-y-2">
+              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
+                Orden de turno en la mesa (Sentido Horario):
+              </span>
+              <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-300">
+                {playerList.slice(0, numPlayers).map((p, idx) => (
+                  <React.Fragment key={idx}>
+                    <span
+                      className={`px-2 py-0.5 rounded-md text-xs font-bold flex items-center space-x-1 ${
+                        idx === 0
+                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                          : idx === 1
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                          : 'bg-slate-800 text-slate-300'
+                      }`}
+                    >
+                      <span>{p.avatar}</span>
+                      <span>{p.name.trim() || `Jugador ${idx + 1}`}</span>
+                      {idx === 0 && <span title="Repartidor inicial">👑</span>}
+                      {idx === 1 && <span title="Mano inicial">✋</span>}
+                    </span>
+                    {idx < numPlayers - 1 && <ArrowRight className="w-3.5 h-3.5 text-slate-600 shrink-0" />}
+                  </React.Fragment>
+                ))}
+              </div>
             </div>
           </section>
 
@@ -609,6 +718,148 @@ export const SetupGame: React.FC<SetupGameProps> = ({
                   </p>
                 </div>
               </label>
+            </div>
+
+            {/* Panel Especial: Apuestas a Cero (Pedir 0 Bazas) - Premiar vs Penalizar */}
+            <div className="bg-gradient-to-br from-slate-900/90 to-slate-950 border border-amber-500/30 rounded-2xl p-4 sm:p-5 space-y-4 shadow-lg">
+              <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+                <div className="flex items-center space-x-2.5">
+                  <span className="text-xl">🎯</span>
+                  <div>
+                    <h4 className="font-black text-sm text-amber-300">
+                      Apuestas a Cero Bazas (Pocha a Cero)
+                    </h4>
+                    <p className="text-[11px] text-slate-400">
+                      Configura si deseas premiar el mérito de no llevarse ninguna baza o penalizar el juego conservador.
+                    </p>
+                  </div>
+                </div>
+                <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 hidden sm:inline-block">
+                  Personalizable
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* 1. Premio / Penalización al Acertar 0 Bazas */}
+                <div className="space-y-2 bg-slate-950/70 p-3.5 rounded-xl border border-slate-800/80">
+                  <label className="text-xs font-bold text-emerald-400 flex items-center justify-between">
+                    <span>Puntuación al ACERTAR 0 Bazas:</span>
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      {rules.zeroBidRule === 'reduced_penalty'
+                        ? '+5 pts'
+                        : rules.zeroBidRule === 'bonus_reward'
+                        ? '+20 pts'
+                        : rules.zeroBidRule === 'scaled_cards'
+                        ? '+10 + 2×cartas'
+                        : rules.zeroBidRule === 'custom_points'
+                        ? `+${rules.zeroBidCustomPoints ?? 10} pts`
+                        : '+10 pts (Estándar)'}
+                    </span>
+                  </label>
+
+                  <select
+                    value={rules.zeroBidRule || 'standard'}
+                    onChange={(e) =>
+                      setRules({
+                        ...rules,
+                        zeroBidRule: e.target.value as any,
+                      })
+                    }
+                    className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs font-bold focus:border-amber-400 focus:outline-none cursor-pointer"
+                  >
+                    <option value="standard">
+                      🏆 Estándar Oficial (+10 pts)
+                    </option>
+                    <option value="scaled_cards">
+                      📈 Escalar por Dificultad (+10 base + 2 por carta en juego)
+                    </option>
+                    <option value="reduced_penalty">
+                      ⚠️ Penalizar Cero Fácil (+5 pts reducidos)
+                    </option>
+                    <option value="bonus_reward">
+                      🌟 Superpremio a Cero (+20 pts fijos)
+                    </option>
+                    <option value="custom_points">
+                      ✏️ Puntuación Fija Personalizada...
+                    </option>
+                  </select>
+
+                  {rules.zeroBidRule === 'custom_points' && (
+                    <div className="pt-2 flex items-center space-x-2">
+                      <span className="text-xs text-slate-300 font-medium">Puntos fijos al acertar 0:</span>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={rules.zeroBidCustomPoints !== undefined ? rules.zeroBidCustomPoints : 10}
+                        onChange={(e) =>
+                          setRules({
+                            ...rules,
+                            zeroBidCustomPoints: parseInt(e.target.value, 10) || 0,
+                          })
+                        }
+                        className="w-20 bg-slate-900 border border-amber-500/50 rounded px-2 py-1 text-xs font-bold text-amber-300 text-center focus:outline-none"
+                      />
+                      <span className="text-xs text-slate-400">pts</span>
+                    </div>
+                  )}
+
+                  <p className="text-[11px] text-slate-400 leading-tight">
+                    {rules.zeroBidRule === 'scaled_cards'
+                      ? 'Recompensa la dificultad real: en 1 carta da 12 pts, en 5 cartas 20 pts y en 8 cartas 26 pts (+doble en Oros).'
+                      : rules.zeroBidRule === 'reduced_penalty'
+                      ? 'Otorga solo +5 puntos para incentivar a pedir bazas y castigar el juego pasivo.'
+                      : rules.zeroBidRule === 'bonus_reward'
+                      ? 'Premia el riesgo de quedarse a cero con +20 puntos en lugar de los 10 habituales.'
+                      : rules.zeroBidRule === 'custom_points'
+                      ? 'Define exactamente la cantidad de puntos que gana un jugador al pedir y hacer 0 bazas.'
+                      : 'Regla clásica oficial: 10 puntos fijos (+ 5×0 bazas = +10 pts).'}
+                  </p>
+                </div>
+
+                {/* 2. Penalización al Fallar Apuesta de 0 Bazas */}
+                <div className="space-y-2 bg-slate-950/70 p-3.5 rounded-xl border border-slate-800/80">
+                  <label className="text-xs font-bold text-rose-400 flex items-center justify-between">
+                    <span>Penalización al FALLAR con 0 Bazas:</span>
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      {rules.zeroBidFailPenalty === 'double_penalty'
+                        ? '-20 - 10×bazas'
+                        : rules.zeroBidFailPenalty === 'harsh_20'
+                        ? '-20 - 5×bazas'
+                        : '-10 - 5×bazas (Estándar)'}
+                    </span>
+                  </label>
+
+                  <select
+                    value={rules.zeroBidFailPenalty || 'standard'}
+                    onChange={(e) =>
+                      setRules({
+                        ...rules,
+                        zeroBidFailPenalty: e.target.value as any,
+                      })
+                    }
+                    className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs font-bold focus:border-rose-400 focus:outline-none cursor-pointer"
+                  >
+                    <option value="standard">
+                      🛡️ Estándar Oficial (-10 base - 5 por cada baza hecha)
+                    </option>
+                    <option value="double_penalty">
+                      💥 Castigo Doble (-20 base - 10 por cada baza involuntaria)
+                    </option>
+                    <option value="harsh_20">
+                      ⚡ Penalización Agravada (-20 base fija - 5 por baza)
+                    </option>
+                  </select>
+
+                  <p className="text-[11px] text-slate-400 leading-tight">
+                    {rules.zeroBidFailPenalty === 'double_penalty'
+                      ? 'Castiga duramente "comerse" bazas tras pedir cero: resta -20 de base y -10 por cada baza ganada sin querer.'
+                      : rules.zeroBidFailPenalty === 'harsh_20'
+                      ? 'Aumenta la penalización base por fallo de -10 a -20 puntos.'
+                      : 'Regla clásica: se resta -10 puntos de base y -5 por cada baza involuntaria que se haya ganado.'}
+                  </p>
+                </div>
+              </div>
             </div>
           </section>
 

@@ -1,4 +1,4 @@
-import { GameRules, Player, PlayerStats, Round, RoundScore, Suit, SuitInfo } from '../types';
+import { GameRules, Player, PlayerStats, Round, RoundScore, Suit, SuitInfo, BiddingAnalysis } from '../types';
 
 export const SUITS: Record<Suit, SuitInfo> = {
   oros: {
@@ -72,17 +72,17 @@ export const PLAYER_AVATARS = [
  * Exact target rounds distribution specified by the official rules:
  * 4 jugadores -> 32 rondas
  * 5 jugadores -> 32 rondas
- * 6 jugadores -> 38 rondas
+ * 6 jugadores -> 36 rondas
  * 7 jugadores -> 38 rondas
- * 8 jugadores -> 44 rondas
+ * 8 jugadores -> 40 rondas
  */
 export const TARGET_ROUNDS_FOR_PLAYERS: Record<number, number> = {
   3: 28,
   4: 32,
   5: 32,
-  6: 38,
+  6: 36,
   7: 38,
-  8: 44,
+  8: 40,
 };
 
 /**
@@ -117,9 +117,9 @@ export function getMaxCards(numPlayers: number, deckCards: number = 40): number 
  * Produces exactly the target round counts:
  * 4 jugadores -> 32 rondas
  * 5 jugadores -> 32 rondas
- * 6 jugadores -> 38 rondas
+ * 6 jugadores -> 36 rondas
  * 7 jugadores -> 38 rondas
- * 8 jugadores -> 44 rondas
+ * 8 jugadores -> 40 rondas
  */
 export function generateDefaultRounds(
   numPlayers: number,
@@ -255,6 +255,358 @@ export function generateDefaultRounds(
   return rounds;
 }
 
+/**
+ * Adapts and recalculates the game's round table when a new player is added mid-game
+ * (specifically inserted after the dealer or at a chosen seat position).
+ * Re-aligns max cards, dealer rotation for the new player count, and future round structure.
+ */
+export function adaptRoundsForNewPlayerCount(
+  existingRounds: Round[],
+  currentRoundIndex: number,
+  originalPlayers: Player[],
+  updatedPlayers: Player[],
+  rules: GameRules,
+  deckCards: number = 40
+): Round[] {
+  const newNumPlayers = updatedPlayers.length;
+  const newMaxCards = getMaxCards(newNumPlayers, deckCards);
+  const suitsList: Suit[] = ['oros', 'copas', 'espadas', 'bastos'];
+
+  // Map each player ID to their new index in updatedPlayers
+  const playerIdToNewIndex: Record<string, number> = {};
+  updatedPlayers.forEach((p, idx) => {
+    playerIdToNewIndex[p.id] = idx;
+  });
+
+  const adaptedRounds: Round[] = [];
+
+  // 1. Process past completed rounds (0 .. currentRoundIndex - 1)
+  for (let i = 0; i < currentRoundIndex; i++) {
+    const oldRound = existingRounds[i];
+    if (!oldRound) continue;
+    const oldDealer = originalPlayers[oldRound.dealerIndex];
+    const newDealerIdx =
+      oldDealer && playerIdToNewIndex[oldDealer.id] !== undefined
+        ? playerIdToNewIndex[oldDealer.id]
+        : oldRound.dealerIndex % newNumPlayers;
+
+    adaptedRounds.push({
+      ...oldRound,
+      dealerIndex: newDealerIdx,
+    });
+  }
+
+  // 2. Process current round
+  const currentOldRound =
+    existingRounds[currentRoundIndex] || existingRounds[existingRounds.length - 1];
+
+  let currentDealerIdx = 0;
+  let currentTrump: Suit = 'oros';
+  let currentCards = 1;
+
+  if (currentOldRound) {
+    const currentOldDealer = originalPlayers[currentOldRound.dealerIndex];
+    currentDealerIdx =
+      currentOldDealer && playerIdToNewIndex[currentOldDealer.id] !== undefined
+        ? playerIdToNewIndex[currentOldDealer.id]
+        : (currentOldRound.dealerIndex || 0) % newNumPlayers;
+
+    currentTrump = currentOldRound.trump || 'oros';
+    currentCards = Math.max(1, Math.min(currentOldRound.cards, newMaxCards));
+
+    adaptedRounds.push({
+      ...currentOldRound,
+      cards: currentCards,
+      dealerIndex: currentDealerIdx,
+    });
+  }
+
+  // 3. Generate remaining future rounds from current state onwards
+  let nextDealerIdx = (currentDealerIdx + 1) % newNumPlayers;
+  let suitIndex = (suitsList.indexOf(currentTrump) + 1) % suitsList.length;
+
+  const getNextSuit = (): Suit => {
+    const s = suitsList[suitIndex % suitsList.length];
+    suitIndex++;
+    return s;
+  };
+
+  const getNextDealer = (): number => {
+    const d = nextDealerIdx % newNumPlayers;
+    nextDealerIdx = (nextDealerIdx + 1) % newNumPlayers;
+    return d;
+  };
+
+  const enableSubastado = rules?.enableSubastado !== false;
+  const enableRandomTrumpMax = rules?.randomTrumpAfterSubastado !== false;
+  const nonMaxRoundsCount = 2 * newNumPlayers + 2 * Math.max(0, newMaxCards - 2);
+  const targetTotal =
+    TARGET_ROUNDS_FOR_PLAYERS[newNumPlayers] || nonMaxRoundsCount + newNumPlayers * 2;
+  const maxRoundsCount = Math.max(1, targetTotal - nonMaxRoundsCount);
+
+  const isDescending =
+    currentOldRound?.phaseName?.toLowerCase().includes('bajada') ||
+    (currentOldRound &&
+      currentOldRound.roundNumber > existingRounds.length / 2 &&
+      currentCards < newMaxCards);
+
+  const remainingRoundsConfig: Array<{
+    cards: number;
+    phaseName: string;
+    isSubastado?: boolean;
+    isRandomTrumpMax?: boolean;
+  }> = [];
+
+  if (!isDescending && currentCards < newMaxCards) {
+    // If in primera vuelta (1 card), ensure all players get 1 dealer turn
+    const roundsOf1SoFar = adaptedRounds.filter(
+      (r) => r.cards === 1 && !r.phaseName?.includes('Final')
+    ).length;
+    const remainingVuelta1 = Math.max(0, newNumPlayers - roundsOf1SoFar);
+
+    if (currentCards === 1 && remainingVuelta1 > 0) {
+      for (let i = 0; i < remainingVuelta1; i++) {
+        remainingRoundsConfig.push({
+          cards: 1,
+          phaseName: 'Primera Vuelta (1 carta)',
+        });
+      }
+    }
+
+    // Ascend to newMaxCards
+    const startAscend = currentCards === 1 ? 2 : currentCards + 1;
+    for (let c = startAscend; c < newMaxCards; c++) {
+      remainingRoundsConfig.push({
+        cards: c,
+        phaseName: `Subida (${c} cartas)`,
+      });
+    }
+
+    // Max cards rounds
+    for (let i = 0; i < maxRoundsCount; i++) {
+      let isSubastado = false;
+      let isRandomTrump = false;
+      let phaseName = `Todas las Cartas (${newMaxCards} cartas)`;
+
+      if (enableSubastado && i < newNumPlayers) {
+        isSubastado = true;
+        phaseName = `Vuelta Máximas: Subastado (${newMaxCards} cartas)`;
+      } else if (enableRandomTrumpMax) {
+        isRandomTrump = true;
+        phaseName = `Vuelta Máximas: Triunfo Dador (${newMaxCards} cartas)`;
+      } else {
+        phaseName = `Vuelta Máximas (${newMaxCards} cartas)`;
+      }
+
+      remainingRoundsConfig.push({
+        cards: newMaxCards,
+        phaseName,
+        isSubastado,
+        isRandomTrumpMax: isRandomTrump,
+      });
+    }
+
+    // Descend
+    for (let c = newMaxCards - 1; c >= 2; c--) {
+      remainingRoundsConfig.push({
+        cards: c,
+        phaseName: `Bajada (${c} cartas)`,
+      });
+    }
+
+    // Final vuelta 1
+    for (let i = 0; i < newNumPlayers; i++) {
+      remainingRoundsConfig.push({
+        cards: 1,
+        phaseName: 'Vuelta Final (1 carta)',
+      });
+    }
+  } else if (currentCards === newMaxCards && !isDescending) {
+    // Max cards phase
+    const maxRoundsDone = adaptedRounds.filter((r) => r.cards === newMaxCards).length;
+    const remainingMaxRounds = Math.max(1, maxRoundsCount - maxRoundsDone);
+
+    for (let i = 0; i < remainingMaxRounds; i++) {
+      const idx = maxRoundsDone + i;
+      let isSubastado = false;
+      let isRandomTrump = false;
+      let phaseName = `Todas las Cartas (${newMaxCards} cartas)`;
+
+      if (enableSubastado && idx < newNumPlayers) {
+        isSubastado = true;
+        phaseName = `Vuelta Máximas: Subastado (${newMaxCards} cartas)`;
+      } else if (enableRandomTrumpMax) {
+        isRandomTrump = true;
+        phaseName = `Vuelta Máximas: Triunfo Dador (${newMaxCards} cartas)`;
+      }
+
+      remainingRoundsConfig.push({
+        cards: newMaxCards,
+        phaseName,
+        isSubastado,
+        isRandomTrumpMax: isRandomTrump,
+      });
+    }
+
+    // Descend
+    for (let c = newMaxCards - 1; c >= 2; c--) {
+      remainingRoundsConfig.push({
+        cards: c,
+        phaseName: `Bajada (${c} cartas)`,
+      });
+    }
+
+    // Final vuelta 1
+    for (let i = 0; i < newNumPlayers; i++) {
+      remainingRoundsConfig.push({
+        cards: 1,
+        phaseName: 'Vuelta Final (1 carta)',
+      });
+    }
+  } else {
+    // Descending phase
+    const startDescend = currentCards > 2 ? currentCards - 1 : 2;
+    for (let c = startDescend; c >= 2; c--) {
+      remainingRoundsConfig.push({
+        cards: c,
+        phaseName: `Bajada (${c} cartas)`,
+      });
+    }
+
+    // Final vuelta 1
+    for (let i = 0; i < newNumPlayers; i++) {
+      remainingRoundsConfig.push({
+        cards: 1,
+        phaseName: 'Vuelta Final (1 carta)',
+      });
+    }
+  }
+
+  // Append remaining rounds
+  remainingRoundsConfig.forEach((cfg) => {
+    let trump: Suit;
+    if (cfg.isSubastado) {
+      trump = 'oros';
+    } else if (cfg.isRandomTrumpMax) {
+      trump = drawRandomCardForTrump().suit;
+    } else {
+      trump = getNextSuit();
+    }
+
+    adaptedRounds.push({
+      id: `round_${adaptedRounds.length + 1}`,
+      roundNumber: adaptedRounds.length + 1,
+      cards: cfg.cards,
+      dealerIndex: getNextDealer(),
+      trump,
+      phase: 'bidding',
+      scores: {},
+      phaseName: cfg.phaseName,
+      isSubastado: cfg.isSubastado,
+      isRandomTrumpMax: cfg.isRandomTrumpMax,
+    });
+  });
+
+  // Re-number and re-id all rounds
+  const finalRounds = adaptedRounds.map((r, idx) => ({
+    ...r,
+    roundNumber: idx + 1,
+    id: `round_${idx + 1}`,
+  }));
+
+  return recalculateGameScores(updatedPlayers, finalRounds, rules);
+}
+
+/**
+ * Reorders the players in an ongoing game to match their physical table seating positions.
+ * Remaps the dealer index for past/current rounds so the historical dealer remains the same person,
+ * and seamlessly rotates future dealers around the new table seating order.
+ */
+export function reorderGamePlayers(
+  existingRounds: Round[],
+  currentRoundIndex: number,
+  originalPlayers: Player[],
+  newOrderedPlayers: Player[],
+  rules: GameRules,
+  rotateFutureDealersSequentially: boolean = true
+): { players: Player[]; rounds: Round[] } {
+  const numPlayers = newOrderedPlayers.length;
+
+  const playerIdToNewIndex: Record<string, number> = {};
+  newOrderedPlayers.forEach((p, idx) => {
+    playerIdToNewIndex[p.id] = idx;
+  });
+
+  const updatedRounds: Round[] = [];
+
+  // 1. Process past rounds (0 .. currentRoundIndex - 1)
+  for (let i = 0; i < currentRoundIndex; i++) {
+    const round = existingRounds[i];
+    if (!round) continue;
+
+    const oldDealer = originalPlayers[round.dealerIndex];
+    const newDealerIdx =
+      oldDealer && playerIdToNewIndex[oldDealer.id] !== undefined
+        ? playerIdToNewIndex[oldDealer.id]
+        : round.dealerIndex % numPlayers;
+
+    updatedRounds.push({
+      ...round,
+      dealerIndex: newDealerIdx,
+    });
+  }
+
+  // 2. Process current round
+  const currentRound = existingRounds[currentRoundIndex];
+  let currentDealerNewIdx = 0;
+
+  if (currentRound) {
+    const oldDealer = originalPlayers[currentRound.dealerIndex];
+    currentDealerNewIdx =
+      oldDealer && playerIdToNewIndex[oldDealer.id] !== undefined
+        ? playerIdToNewIndex[oldDealer.id]
+        : currentRound.dealerIndex % numPlayers;
+
+    updatedRounds.push({
+      ...currentRound,
+      dealerIndex: currentDealerNewIdx,
+    });
+  }
+
+  // 3. Process future rounds
+  let nextDealerTracker = (currentDealerNewIdx + 1) % numPlayers;
+
+  for (let i = currentRoundIndex + 1; i < existingRounds.length; i++) {
+    const futureRound = existingRounds[i];
+    if (!futureRound) continue;
+
+    let targetDealerIdx: number;
+
+    if (rotateFutureDealersSequentially) {
+      targetDealerIdx = nextDealerTracker;
+      nextDealerTracker = (nextDealerTracker + 1) % numPlayers;
+    } else {
+      const oldDealer = originalPlayers[futureRound.dealerIndex];
+      targetDealerIdx =
+        oldDealer && playerIdToNewIndex[oldDealer.id] !== undefined
+          ? playerIdToNewIndex[oldDealer.id]
+          : futureRound.dealerIndex % numPlayers;
+    }
+
+    updatedRounds.push({
+      ...futureRound,
+      dealerIndex: targetDealerIdx,
+    });
+  }
+
+  const recalculatedRounds = recalculateGameScores(newOrderedPlayers, updatedRounds, rules);
+
+  return {
+    players: newOrderedPlayers,
+    rounds: recalculatedRounds,
+  };
+}
+
 export interface DeckCard {
   suit: Suit;
   rank: string;
@@ -350,9 +702,38 @@ export function calculateScore(
 
   let basePoints = 0;
   if (hit) {
-    basePoints = 10 + 5 * bid;
+    if (bid === 0) {
+      // Regla de Apuestas a Cero (Pedir 0 bazas)
+      const zeroRule = rules?.zeroBidRule || 'standard';
+      if (zeroRule === 'reduced_penalty') {
+        basePoints = 5; // Penalizar 0 fácil (+5 pts)
+      } else if (zeroRule === 'bonus_reward') {
+        basePoints = 20; // Premiar 0 (+20 pts)
+      } else if (zeroRule === 'scaled_cards') {
+        // Escalar por dificultad según cartas repartidas
+        basePoints = 10 + 2 * cards;
+      } else if (zeroRule === 'custom_points') {
+        basePoints = rules?.zeroBidCustomPoints !== undefined ? rules.zeroBidCustomPoints : 10;
+      } else {
+        basePoints = 10; // Estándar oficial (10 + 5*0 = 10)
+      }
+    } else {
+      basePoints = 10 + 5 * bid;
+    }
   } else {
-    basePoints = -10 - 5 * difference;
+    if (bid === 0) {
+      // Penalización por fallar apuesta de cero bazas
+      const zeroFailPenalty = rules?.zeroBidFailPenalty || 'standard';
+      if (zeroFailPenalty === 'double_penalty') {
+        basePoints = -20 - 10 * difference; // Doble castigo por comerse bazas involuntarias
+      } else if (zeroFailPenalty === 'harsh_20') {
+        basePoints = -20 - 5 * difference; // Base agravada de -20
+      } else {
+        basePoints = -10 - 5 * difference; // Estándar oficial
+      }
+    } else {
+      basePoints = -10 - 5 * difference;
+    }
   }
 
   const points = isOrosDouble ? basePoints * 2 : basePoints;
@@ -491,6 +872,139 @@ export function getForbiddenDealerBid(
 }
 
 /**
+ * Calculates automatically how many tricks are left or exceeded in the bidding phase
+ * based on the number of cards dealt, and detects impossible, invalid, or forbidden bidding situations.
+ */
+export function calculateBiddingStatus(
+  cards: number,
+  bids: Record<string, number | null | undefined>,
+  players: Player[],
+  dealerIndex: number,
+  rules: GameRules
+): BiddingAnalysis {
+  const safeDealerIndex = players.length > 0 ? ((dealerIndex % players.length) + players.length) % players.length : 0;
+  const dealer = players[safeDealerIndex];
+
+  let totalBids = 0;
+  let enteredCount = 0;
+  let hasIndividualInvalidBids = false;
+
+  players.forEach((p) => {
+    const val = bids[p.id];
+    if (val !== undefined && val !== null) {
+      if (val < 0 || val > cards) {
+        hasIndividualInvalidBids = true;
+      }
+      totalBids += Math.max(0, val);
+      enteredCount++;
+    }
+  });
+
+  const allBidsEntered = enteredCount === players.length;
+  const pendingPlayersCount = Math.max(0, players.length - enteredCount);
+  const remainingToMatchCards = cards - totalBids;
+  const differenceAbs = Math.abs(remainingToMatchCards);
+  const maxPossibleBidsInRound = cards * players.length;
+
+  let bidsStatus: 'under' | 'over' | 'exact' = 'exact';
+  if (remainingToMatchCards > 0) {
+    bidsStatus = 'under';
+  } else if (remainingToMatchCards < 0) {
+    bidsStatus = 'over';
+  }
+
+  // Calculate forbidden dealer bid
+  const mockRound: Round = {
+    id: 'temp',
+    roundNumber: 1,
+    cards,
+    dealerIndex: safeDealerIndex,
+    trump: 'oros',
+    phase: 'bidding',
+    scores: Object.fromEntries(
+      Object.entries(bids).map(([pId, b]) => [
+        pId,
+        {
+          playerId: pId,
+          bid: b ?? null,
+          actual: null,
+          points: 0,
+          accumulatedPoints: 0,
+          hit: null,
+          difference: 0,
+        },
+      ])
+    ),
+  };
+
+  const forbiddenDealerBid = getForbiddenDealerBid(players, safeDealerIndex, mockRound, rules);
+  const dealerBid = dealer ? bids[dealer.id] : undefined;
+  const isDealerForbiddenViolated =
+    Boolean(rules.forbiddenDealerBid) &&
+    forbiddenDealerBid !== null &&
+    dealerBid !== undefined &&
+    dealerBid !== null &&
+    dealerBid === forbiddenDealerBid;
+
+  let statusMessage = '';
+  let tacticalTip = '';
+  let severity: 'info' | 'success' | 'warning' | 'error' = 'info';
+
+  if (hasIndividualInvalidBids) {
+    statusMessage = `Apuesta inválida: ningún jugador puede pedir más de ${cards} ni menos de 0 bazas con ${cards} ${cards === 1 ? 'carta' : 'cartas'} en juego.`;
+    tacticalTip = 'Corrige las apuestas individuales para que estén comprendidas entre 0 y el número de cartas de la ronda.';
+    severity = 'error';
+  } else if (isDealerForbiddenViolated) {
+    statusMessage = `¡Regla violada! El repartidor (${dealer?.name || 'repartidor'}) no puede pedir ${forbiddenDealerBid} bazas porque empataría exactamente las ${cards} cartas.`;
+    tacticalTip = 'El repartidor debe cambiar su apuesta (pedir al menos 1 baza más o menos) para que la suma no coincida con las cartas.';
+    severity = 'error';
+  } else if (totalBids > maxPossibleBidsInRound) {
+    statusMessage = `Suma imposible: se han pedido ${totalBids} bazas en total, pero el límite físico absoluto de la mesa es ${maxPossibleBidsInRound}.`;
+    tacticalTip = 'Revisa las apuestas introducidas en la ronda.';
+    severity = 'error';
+  } else if (bidsStatus === 'under') {
+    // Faltan bazas por pedir para cubrir las cartas repartidas
+    statusMessage = `Faltan ${differenceAbs} ${differenceAbs === 1 ? 'baza' : 'bazas'} por pedir para cubrir las ${cards} cartas (${totalBids}/${cards}).`;
+    tacticalTip = allBidsEntered
+      ? `📉 La partida va corta (de menos): Sobrarán ${differenceAbs} ${differenceAbs === 1 ? 'baza libre' : 'bazas libres'} sin dueño. Al menos un jugador ganará bazas involuntarias y fallará su apuesta.`
+      : `Quedan ${pendingPlayersCount} ${pendingPlayersCount === 1 ? 'jugador' : 'jugadores'} por pedir su apuesta.`;
+    severity = allBidsEntered ? 'warning' : 'info';
+  } else if (bidsStatus === 'over') {
+    // Se han pedido más bazas de las cartas repartidas
+    statusMessage = `Se han pedido +${differenceAbs} ${differenceAbs === 1 ? 'baza' : 'bazas'} de más respecto a las ${cards} cartas (${totalBids}/${cards}).`;
+    tacticalTip = `🔥 La partida va pasada (de más): Faltan ${differenceAbs} ${differenceAbs === 1 ? 'baza física' : 'bazas físicas'} en la mesa. Al menos un jugador no podrá cumplir su apuesta obligatoriamente.`;
+    severity = 'warning';
+  } else {
+    // Exact match (totalBids === cards)
+    statusMessage = `La suma de bazas pedidas (${totalBids}) coincide exactamente con las ${cards} cartas repartidas.`;
+    if (rules.forbiddenDealerBid) {
+      tacticalTip = '⚠️ Si todos los jugadores han apostado, el repartidor no tiene permitido dejar la suma exacta.';
+      severity = 'warning';
+    } else {
+      tacticalTip = '🎯 Subasta exacta: Si todos los jugadores ganan sus bazas pedidas, todos puntuarán en la ronda.';
+      severity = 'success';
+    }
+  }
+
+  return {
+    cards,
+    totalBids,
+    remainingToMatchCards,
+    bidsStatus,
+    differenceAbs,
+    allBidsEntered,
+    pendingPlayersCount,
+    maxPossibleBidsInRound,
+    isDealerForbiddenViolated,
+    forbiddenDealerBid,
+    hasIndividualInvalidBids,
+    statusMessage,
+    tacticalTip,
+    severity,
+  };
+}
+
+/**
  * Parses natural Spanish spoken or typed text into player bids or actuals
  * E.g., "Carlos 2, Ana 1, Pedro cero" -> { "p_1": 2, "p_2": 1, "p_3": 0 }
  */
@@ -561,7 +1075,7 @@ export function calculatePlayerStats(players: Player[], rounds: Round[]): Player
   const completedRounds = rounds.filter((r) => r.phase === 'completed');
 
   return players.map((player) => {
-    let totalPoints = 0;
+    let totalPoints = player.startingPoints || 0;
     let totalHits = 0;
     let totalMisses = 0;
     let totalBids = 0;

@@ -1,4 +1,5 @@
 import { Game, PlayerStats } from '../types';
+import { getSafeStorage, STORAGE_KEYS } from './safeBoot';
 
 export interface RecentWinner {
   id: string;
@@ -38,20 +39,19 @@ export type SavedGame = SavedGameRecord;
 export const loadRecentWinners = getRecentWinners;
 export const loadSavedGames = getSavedGames;
 
-const RECENT_WINNERS_KEY = 'pocha_recent_winners_v1';
-const SAVED_GAMES_KEY = 'pocha_saved_games_v1';
-
 /**
- * Retrieves the last 5 game winners from localStorage
+ * Retrieves the last 5 game winners from safe storage
  */
 export function getRecentWinners(): RecentWinner[] {
-  if (typeof window === 'undefined') return [];
   try {
-    const data = localStorage.getItem(RECENT_WINNERS_KEY);
+    const storage = getSafeStorage();
+    const data = storage.getItem(STORAGE_KEYS.RECENT_WINNERS);
     if (!data) return [];
     const parsed = JSON.parse(data);
     if (Array.isArray(parsed)) {
-      return parsed.slice(0, 5);
+      return parsed
+        .filter((w: any) => w && typeof w.playerName === 'string')
+        .slice(0, 5);
     }
   } catch (e) {
     console.error('Error loading recent winners:', e);
@@ -60,16 +60,16 @@ export function getRecentWinners(): RecentWinner[] {
 }
 
 /**
- * Retrieves all saved games from localStorage
+ * Retrieves all saved games from safe storage
  */
 export function getSavedGames(): SavedGameRecord[] {
-  if (typeof window === 'undefined') return [];
   try {
-    const data = localStorage.getItem(SAVED_GAMES_KEY);
+    const storage = getSafeStorage();
+    const data = storage.getItem(STORAGE_KEYS.SAVED_GAMES);
     if (!data) return [];
     const parsed = JSON.parse(data);
     if (Array.isArray(parsed)) {
-      return parsed;
+      return parsed.filter((g: any) => g && g.id && Array.isArray(g.rankings));
     }
   } catch (e) {
     console.error('Error loading saved games:', e);
@@ -81,9 +81,10 @@ export function getSavedGames(): SavedGameRecord[] {
  * Saves a completed game into history and records the winner into the recent 5 winners list
  */
 export function saveCompletedGame(game: Game, stats: PlayerStats[]): void {
-  if (typeof window === 'undefined' || !stats || stats.length === 0) return;
+  if (!stats || stats.length === 0) return;
 
   try {
+    const storage = getSafeStorage();
     const winnerStat = stats[0];
     const winner: RecentWinner = {
       id: `winner_${Date.now()}`,
@@ -104,7 +105,7 @@ export function saveCompletedGame(game: Game, stats: PlayerStats[]): void {
       (w) => !(w.playerName === winner.playerName && Math.abs(new Date(w.date).getTime() - Date.now()) < 5000)
     );
     const updatedWinners = [winner, ...filteredWinners].slice(0, 5);
-    localStorage.setItem(RECENT_WINNERS_KEY, JSON.stringify(updatedWinners));
+    storage.setItem(STORAGE_KEYS.RECENT_WINNERS, JSON.stringify(updatedWinners));
 
     // 2. Update Saved Games History
     const rankings: SavedGameRanking[] = stats.map((st) => ({
@@ -139,7 +140,7 @@ export function saveCompletedGame(game: Game, stats: PlayerStats[]): void {
       updatedSaved = [newRecord, ...currentSaved];
     }
 
-    localStorage.setItem(SAVED_GAMES_KEY, JSON.stringify(updatedSaved));
+    storage.setItem(STORAGE_KEYS.SAVED_GAMES, JSON.stringify(updatedSaved.slice(0, 50)));
   } catch (e) {
     console.error('Error saving completed game:', e);
   }
@@ -149,11 +150,11 @@ export function saveCompletedGame(game: Game, stats: PlayerStats[]): void {
  * Deletes a single game from saved games history
  */
 export function deleteSavedGame(gameId: string): SavedGameRecord[] {
-  if (typeof window === 'undefined') return [];
   try {
+    const storage = getSafeStorage();
     const current = getSavedGames();
     const updated = current.filter((g) => g.id !== gameId);
-    localStorage.setItem(SAVED_GAMES_KEY, JSON.stringify(updated));
+    storage.setItem(STORAGE_KEYS.SAVED_GAMES, JSON.stringify(updated));
     return updated;
   } catch (e) {
     console.error('Error deleting game:', e);
@@ -165,9 +166,9 @@ export function deleteSavedGame(gameId: string): SavedGameRecord[] {
  * Clears the entire saved games history
  */
 export function clearAllSavedGames(): void {
-  if (typeof window === 'undefined') return;
   try {
-    localStorage.removeItem(SAVED_GAMES_KEY);
+    const storage = getSafeStorage();
+    storage.removeItem(STORAGE_KEYS.SAVED_GAMES);
   } catch (e) {
     console.error('Error clearing saved games:', e);
   }
@@ -177,9 +178,9 @@ export function clearAllSavedGames(): void {
  * Clears the recent winners list
  */
 export function clearRecentWinners(): void {
-  if (typeof window === 'undefined') return;
   try {
-    localStorage.removeItem(RECENT_WINNERS_KEY);
+    const storage = getSafeStorage();
+    storage.removeItem(STORAGE_KEYS.RECENT_WINNERS);
   } catch (e) {
     console.error('Error clearing winners:', e);
   }

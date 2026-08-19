@@ -1,6 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { GameRules, Player, Round, Suit } from '../types';
-import { SUITS, getForbiddenDealerBid, getBiddingOrder, getHighestBidder, calculateScore } from '../utils/pocha';
+import {
+  SUITS,
+  getForbiddenDealerBid,
+  getBiddingOrder,
+  getHighestBidder,
+  calculateScore,
+  calculateBiddingStatus,
+} from '../utils/pocha';
 import { soundManager } from '../utils/audio';
 import { CardDrawModal } from './CardDrawModal';
 import {
@@ -17,6 +24,17 @@ import {
   Shuffle,
   Volume2,
   VolumeX,
+  Calculator,
+  Scale,
+  TrendingDown,
+  TrendingUp,
+  Info,
+  Layers,
+  ChevronDown,
+  ChevronUp,
+  Package,
+  HelpCircle,
+  AlertTriangle,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -31,6 +49,7 @@ interface ActiveRoundProps {
   onOpenVoiceModal: (mode: 'bids' | 'actuals') => void;
   onOpenAddPlayerModal?: () => void;
   onOpenEditRoundModal?: () => void;
+  onOpenReorderPlayersModal?: () => void;
 }
 
 export const ActiveRound: React.FC<ActiveRoundProps> = ({
@@ -44,6 +63,7 @@ export const ActiveRound: React.FC<ActiveRoundProps> = ({
   onOpenVoiceModal,
   onOpenAddPlayerModal,
   onOpenEditRoundModal,
+  onOpenReorderPlayersModal,
 }) => {
   const cards = round.cards;
   const dealer = players[round.dealerIndex] || players[0];
@@ -53,7 +73,19 @@ export const ActiveRound: React.FC<ActiveRoundProps> = ({
   const [bids, setBids] = useState<Record<string, number>>({});
   const [actuals, setActuals] = useState<Record<string, number>>({});
   const [showCardDrawModal, setShowCardDrawModal] = useState(false);
+  const [showDeckDetails, setShowDeckDetails] = useState(false);
   const [soundActive, setSoundActive] = useState<boolean>(() => soundManager.isEnabled());
+
+  // Deck & Card distribution calculation based on active rules and players
+  const totalDeckCards = rules.deckCards || 40;
+  const numPlayers = players.length;
+  const cardsPerPlayer = round.cards;
+  const totalCardsDealt = cardsPerPlayer * numPlayers;
+  const leftoverCards = Math.max(0, totalDeckCards - totalCardsDealt);
+  const maxCardsForTable = Math.floor(totalDeckCards / (numPlayers || 1));
+  const isMaxRound = cardsPerPlayer === maxCardsForTable;
+  const dealtPercentage = Math.min(100, Math.round((totalCardsDealt / totalDeckCards) * 100));
+  const leftoverPercentage = Math.max(0, 100 - dealtPercentage);
 
   const handleToggleSound = () => {
     const next = soundManager.toggle();
@@ -85,28 +117,26 @@ export const ActiveRound: React.FC<ActiveRoundProps> = ({
     setActuals(initialActuals);
   }, [round.id, round.phase, players]);
 
-  // Forbidden bid for dealer calculation
-  const forbiddenDealerBid = getForbiddenDealerBid(players, round.dealerIndex, {
-    ...round,
-    scores: Object.fromEntries(
-      Object.entries(bids).map(([pId, b]) => [pId, { playerId: pId, bid: b, actual: null, points: 0, accumulatedPoints: 0, hit: null, difference: 0 }])
-    )
-  }, rules);
-
-  const isDealerForbiddenViolated =
-    round.phase === 'bidding' &&
-    rules.forbiddenDealerBid &&
-    forbiddenDealerBid !== null &&
-    bids[dealer.id] === forbiddenDealerBid;
-
-  // Total sums
+  // Total sums & Full Bidding Analysis
   const totalBids = (Object.values(bids) as number[]).reduce((a: number, b: number) => a + (b || 0), 0);
   const totalActuals = (Object.values(actuals) as number[]).reduce((a: number, b: number) => a + (b || 0), 0);
+
+  const biddingAnalysis = calculateBiddingStatus(
+    cards,
+    bids,
+    players,
+    round.dealerIndex,
+    rules
+  );
+
+  const forbiddenDealerBid = biddingAnalysis.forbiddenDealerBid;
+  const isDealerForbiddenViolated = biddingAnalysis.isDealerForbiddenViolated;
 
   const allBidsEntered = players.every((p) => bids[p.id] !== undefined && bids[p.id] !== null);
   const allActualsEntered = players.every((p) => actuals[p.id] !== undefined && actuals[p.id] !== null);
 
   const isBiddingPhase = round.phase === 'bidding';
+  const isBidsOverCards = isBiddingPhase && totalBids > cards;
 
   // Subastado: Find highest bidder from current bids
   const highestBidderInfo = getHighestBidder(players, {
@@ -270,7 +300,18 @@ export const ActiveRound: React.FC<ActiveRoundProps> = ({
                   className="text-xs font-bold bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 px-2.5 py-1 rounded-md transition flex items-center space-x-1 cursor-pointer"
                   title="Corregir un error en la puntuación o triunfo de esta u otra ronda"
                 >
-                  <span>✏️ Corregir Ronda</span>
+                  <span>✏️ Corregir</span>
+                </button>
+              )}
+
+              {onOpenReorderPlayersModal && (
+                <button
+                  type="button"
+                  onClick={onOpenReorderPlayersModal}
+                  className="text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 px-2.5 py-1 rounded-md transition flex items-center space-x-1 cursor-pointer"
+                  title="Cambiar el orden o asiento físico de los jugadores en la mesa"
+                >
+                  <span>🪑 Orden Mesa</span>
                 </button>
               )}
 
@@ -324,13 +365,47 @@ export const ActiveRound: React.FC<ActiveRoundProps> = ({
               })()}
             </h3>
 
-            {/* Dealer indicator */}
-            <p className="text-xs text-slate-400 mt-1 flex items-center space-x-1">
-              <span>Repartidor (Mano da la vuelta):</span>
-              <span className="font-bold text-amber-300 bg-slate-800 px-2 py-0.5 rounded text-xs">
-                👑 {dealer.name}
+            {/* Dealer & Deck Quick Summary Indicator */}
+            <div className="flex flex-wrap items-center gap-2 mt-1.5 text-xs text-slate-400">
+              <span className="flex items-center space-x-1">
+                <span>Repartidor:</span>
+                <span className="font-bold text-amber-300 bg-slate-800 px-2 py-0.5 rounded text-xs border border-slate-700/60">
+                  👑 {dealer.name}
+                </span>
               </span>
-            </p>
+
+              <span className="text-slate-600">•</span>
+
+              <button
+                type="button"
+                onClick={() => setShowDeckDetails((prev) => !prev)}
+                className="font-medium text-slate-300 hover:text-amber-300 bg-slate-800/80 hover:bg-slate-800 border border-slate-700/80 px-2 py-0.5 rounded flex items-center space-x-1.5 transition cursor-pointer"
+                title="Ver herramienta informativa de reparto y mazo"
+              >
+                <Layers className="w-3.5 h-3.5 text-amber-400" />
+                <span>
+                  <strong>{cardsPerPlayer}</strong> {cardsPerPlayer === 1 ? 'carta/jug' : 'cartas/jug'} ({totalCardsDealt}/{totalDeckCards})
+                </span>
+                <span className="text-amber-400 font-bold">
+                  • {leftoverCards === 0 ? 'Mazo 100% repartido' : `Sobran ${leftoverCards}`}
+                </span>
+                {showDeckDetails ? (
+                  <ChevronUp className="w-3.5 h-3.5 text-slate-400" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                )}
+              </button>
+
+              {isBiddingPhase && isBidsOverCards && (
+                <>
+                  <span className="text-slate-600">•</span>
+                  <span className="text-xs font-bold text-purple-300 bg-purple-950/80 border border-purple-500/60 px-2 py-0.5 rounded flex items-center space-x-1 animate-pulse shadow-sm shadow-purple-500/20">
+                    <AlertTriangle className="w-3.5 h-3.5 text-purple-400" />
+                    <span>Exceso Subasta: {totalBids}/{cards} (+{totalBids - cards})</span>
+                  </span>
+                </>
+              )}
+            </div>
           </div>
 
           {/* Right: High Visibility Trump Suit Selector & Card Drawer */}
@@ -444,6 +519,7 @@ export const ActiveRound: React.FC<ActiveRoundProps> = ({
             </div>
 
             <button
+              type="button"
               onClick={() => setShowCardDrawModal(true)}
               className="text-xs font-black bg-cyan-500 hover:bg-cyan-400 text-slate-950 px-3 py-1.5 rounded-lg transition flex items-center space-x-1.5 cursor-pointer shadow-lg shadow-cyan-500/20"
             >
@@ -452,6 +528,200 @@ export const ActiveRound: React.FC<ActiveRoundProps> = ({
             </button>
           </div>
         )}
+
+        {/* Informative Deck & Card Distribution Tool Card */}
+        <div className="mt-4 bg-slate-900/90 border border-slate-800 rounded-xl overflow-hidden transition-all shadow-md">
+          {/* Collapsible Header */}
+          <div
+            onClick={() => setShowDeckDetails((prev) => !prev)}
+            className="p-3 sm:p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 cursor-pointer hover:bg-slate-800/60 transition select-none"
+          >
+            <div className="flex items-center space-x-2.5">
+              <div className="w-7 h-7 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                <Package className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="flex items-center space-x-2">
+                  <span className="text-xs font-black uppercase tracking-wider text-slate-200">
+                    Reparto y Mazo
+                  </span>
+                  {isMaxRound && (
+                    <span className="text-[10px] font-black uppercase bg-purple-500/20 text-purple-300 border border-purple-500/40 px-1.5 py-0.2 rounded">
+                      Ronda Máxima
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  {cardsPerPlayer} {cardsPerPlayer === 1 ? 'carta' : 'cartas'} por jugador • {totalCardsDealt} en mesa • {leftoverCards === 0 ? 'Mazo completo repartido (0 sobran)' : `${leftoverCards} cartas sobran en mazo`}
+                </p>
+              </div>
+            </div>
+
+            {/* Quick Badges & Toggle Button */}
+            <div className="flex items-center space-x-2 self-end sm:self-auto">
+              <div className="hidden md:flex items-center space-x-1.5 text-xs">
+                <span className="bg-slate-800 text-slate-300 px-2 py-0.5 rounded border border-slate-700 font-bold">
+                  🃏 {cardsPerPlayer} c/u
+                </span>
+                <span className="bg-slate-800 text-slate-300 px-2 py-0.5 rounded border border-slate-700 font-bold">
+                  👥 {totalCardsDealt} en juego
+                </span>
+                <span className={`px-2 py-0.5 rounded border font-bold ${
+                  leftoverCards === 0
+                    ? 'bg-purple-500/20 text-purple-300 border-purple-500/30'
+                    : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                }`}>
+                  📦 {leftoverCards} en mazo
+                </span>
+              </div>
+
+              <button
+                type="button"
+                className="text-xs font-bold text-slate-300 bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded-lg border border-slate-700 flex items-center space-x-1 transition"
+                title={showDeckDetails ? 'Ocultar desglose detallado' : 'Mostrar desglose detallado del mazo'}
+              >
+                <span>{showDeckDetails ? 'Ocultar' : 'Detalles'}</span>
+                {showDeckDetails ? (
+                  <ChevronUp className="w-3.5 h-3.5 text-slate-400" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Expanded Detail Panel */}
+          {showDeckDetails && (
+            <div className="p-4 sm:p-5 border-t border-slate-800/80 bg-slate-950/70 space-y-4 animate-in fade-in duration-200">
+              {/* Dual Visual Distribution Progress Bar */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-xs font-bold">
+                  <span className="text-emerald-400 flex items-center space-x-1">
+                    <span>🃏 Repartidas:</span>
+                    <strong className="text-white">{totalCardsDealt} cartas</strong>
+                    <span className="text-slate-400">({dealtPercentage}%)</span>
+                  </span>
+                  <span className="text-amber-400 flex items-center space-x-1">
+                    <span>📦 Sobrantes en mazo:</span>
+                    <strong className="text-white">{leftoverCards} cartas</strong>
+                    <span className="text-slate-400">({leftoverPercentage}%)</span>
+                  </span>
+                </div>
+
+                <div className="h-3 w-full bg-slate-800 rounded-full overflow-hidden p-0.5 border border-slate-700 flex">
+                  {/* Dealt cards bar */}
+                  <div
+                    className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 rounded-l-full transition-all duration-300"
+                    style={{ width: `${dealtPercentage}%` }}
+                    title={`${totalCardsDealt} cartas repartidas (${dealtPercentage}%)`}
+                  />
+                  {/* Leftover deck bar */}
+                  {leftoverCards > 0 && (
+                    <div
+                      className="h-full bg-gradient-to-r from-amber-500 to-amber-400 rounded-r-full transition-all duration-300"
+                      style={{ width: `${leftoverPercentage}%` }}
+                      title={`${leftoverCards} cartas sobrantes en mazo (${leftoverPercentage}%)`}
+                    />
+                  )}
+                </div>
+              </div>
+
+              {/* 4 Metric Cards Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 flex flex-col justify-between">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                    Por Jugador
+                  </span>
+                  <div className="mt-1">
+                    <span className="text-2xl font-black text-emerald-400">
+                      {cardsPerPlayer}
+                    </span>
+                    <span className="text-xs text-slate-400 ml-1">
+                      {cardsPerPlayer === 1 ? 'carta' : 'cartas'}
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-slate-500 mt-1">
+                    {cardsPerPlayer} {cardsPerPlayer === 1 ? 'baza en juego' : 'bazas en juego'}
+                  </span>
+                </div>
+
+                <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 flex flex-col justify-between">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                    Total en Mesa
+                  </span>
+                  <div className="mt-1">
+                    <span className="text-2xl font-black text-white">
+                      {totalCardsDealt}
+                    </span>
+                    <span className="text-xs text-slate-400 ml-1">cartas</span>
+                  </div>
+                  <span className="text-[10px] text-slate-500 mt-1">
+                    {numPlayers} jugadores × {cardsPerPlayer} cartas
+                  </span>
+                </div>
+
+                <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 flex flex-col justify-between">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                    Sobran en Mazo
+                  </span>
+                  <div className="mt-1">
+                    <span className={`text-2xl font-black ${leftoverCards === 0 ? 'text-purple-400' : 'text-amber-400'}`}>
+                      {leftoverCards}
+                    </span>
+                    <span className="text-xs text-slate-400 ml-1">cartas</span>
+                  </div>
+                  <span className="text-[10px] text-slate-500 mt-1">
+                    {leftoverCards === 0
+                      ? 'Sin talón (100% repartido)'
+                      : leftoverCards === 1
+                      ? '1 pinta de triunfo (0 talón)'
+                      : `1 pinta + ${leftoverCards - 1} en talón`}
+                  </span>
+                </div>
+
+                <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 flex flex-col justify-between">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                    Baraja Activa
+                  </span>
+                  <div className="mt-1">
+                    <span className="text-2xl font-black text-cyan-400">
+                      {totalDeckCards}
+                    </span>
+                    <span className="text-xs text-slate-400 ml-1">cartas</span>
+                  </div>
+                  <span className="text-[10px] text-slate-500 mt-1">
+                    Máx: {maxCardsForTable} cartas/jug ({maxCardsForTable * numPlayers} repartidas)
+                  </span>
+                </div>
+              </div>
+
+              {/* Contextual Deck Dynamics Note */}
+              <div className="bg-slate-900 border border-slate-800/80 rounded-xl p-3 flex items-start space-x-2.5 text-xs text-slate-300">
+                <HelpCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="font-semibold text-slate-200">
+                    {leftoverCards > 0 ? (
+                      <>
+                        De las <strong className="text-amber-300">{leftoverCards} cartas</strong> sobrantes en el mazo,{' '}
+                        se extrae o voltea <strong className="text-white">1 carta</strong> para marcar el palo de triunfo ({suitInfo.name} {suitInfo.symbol}) y quedan{' '}
+                        <strong className="text-amber-300">{leftoverCards - 1} cartas</strong> en el talón (bocabajo sin jugar).
+                      </>
+                    ) : (
+                      <>
+                        El mazo de <strong className="text-cyan-300">{totalDeckCards} cartas</strong> ha sido <strong className="text-white">repartido al 100%</strong> entre los {numPlayers} jugadores. Al no sobrar cartas en el mazo, el triunfo se establece según las reglas especiales de la ronda (Subastado, palo fijado o carta extraída al azar).
+                      </>
+                    )}
+                  </p>
+                  {isMaxRound && (
+                    <p className="text-[11px] text-purple-300 font-medium">
+                      🔝 Esta ronda alcanza la capacidad máxima posible ({cardsPerPlayer} cartas/jugador) para {numPlayers} jugadores con una baraja de {totalDeckCards} cartas.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Main Gameplay Controls */}
@@ -480,6 +750,166 @@ export const ActiveRound: React.FC<ActiveRoundProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Bidding Live Trick Calculator Panel */}
+        {isBiddingPhase && (
+          <div
+            className={`rounded-2xl p-4 sm:p-5 space-y-4 shadow-xl transition-all duration-300 ${
+              isBidsOverCards
+                ? 'bg-slate-950/95 border-2 border-purple-500/90 ring-4 ring-purple-500/30 shadow-[0_0_35px_rgba(168,85,247,0.35)] animate-pulse'
+                : biddingAnalysis.hasIndividualInvalidBids || isDealerForbiddenViolated
+                ? 'bg-slate-950/95 border-2 border-rose-500/80 ring-2 ring-rose-500/20 shadow-xl'
+                : 'bg-slate-950/90 border border-slate-800 shadow-xl'
+            }`}
+          >
+            {/* Top Row: Metric Badges & Status */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center space-x-2.5">
+                <div
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors ${
+                    isBidsOverCards
+                      ? 'bg-purple-500/20 border border-purple-500/40 text-purple-300'
+                      : 'bg-amber-500/15 border border-amber-500/30 text-amber-400'
+                  }`}
+                >
+                  <Calculator className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-xs font-black uppercase tracking-wider text-slate-200">
+                      Cálculo Automático de Bazas
+                    </span>
+                    {isBidsOverCards && (
+                      <span className="text-[10px] font-black uppercase bg-purple-500/30 text-purple-200 border border-purple-400/50 px-1.5 py-0.5 rounded animate-pulse">
+                        Bazas &gt; Cartas
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[11px] text-slate-400 block">
+                    {cards} {cards === 1 ? 'carta repartida' : 'cartas repartidas'} por jugador ({cards} {cards === 1 ? 'baza' : 'bazas'} en juego)
+                  </span>
+                </div>
+              </div>
+
+              {/* Dynamic Trick Balance Badge */}
+              <div className="flex items-center gap-2">
+                {biddingAnalysis.hasIndividualInvalidBids ? (
+                  <span className="text-xs font-black px-3 py-1.5 rounded-xl border bg-rose-500/20 text-rose-300 border-rose-500/40 flex items-center space-x-1.5 shadow-sm">
+                    <AlertCircle className="w-4 h-4 text-rose-400" />
+                    <span>Apuesta Imposible (&gt; {cards} cartas)</span>
+                  </span>
+                ) : biddingAnalysis.isDealerForbiddenViolated ? (
+                  <span className="text-xs font-black px-3 py-1.5 rounded-xl border bg-rose-500/20 text-rose-300 border-rose-500/40 flex items-center space-x-1.5 animate-pulse shadow-sm">
+                    <ShieldAlert className="w-4 h-4 text-rose-400" />
+                    <span>Repartidor: Prohibido pedir {biddingAnalysis.forbiddenDealerBid}</span>
+                  </span>
+                ) : isBidsOverCards ? (
+                  <span className="text-xs font-black px-3.5 py-1.5 rounded-xl border bg-purple-500/25 text-purple-200 border-purple-400/80 ring-2 ring-purple-400/30 flex items-center space-x-2 shadow-lg shadow-purple-500/25 animate-pulse">
+                    <TrendingUp className="w-4 h-4 text-purple-300 shrink-0" />
+                    <span>
+                      ⚠️ Bazas Excedidas: +{biddingAnalysis.differenceAbs} de más ({totalBids}/{cards})
+                    </span>
+                  </span>
+                ) : biddingAnalysis.bidsStatus === 'under' ? (
+                  <span className="text-xs font-black px-3 py-1.5 rounded-xl border bg-amber-500/15 text-amber-300 border-amber-500/30 flex items-center space-x-1.5 shadow-sm">
+                    <TrendingDown className="w-4 h-4 text-amber-400" />
+                    <span>
+                      Faltan {biddingAnalysis.differenceAbs} {biddingAnalysis.differenceAbs === 1 ? 'baza' : 'bazas'} por pedir ({totalBids}/{cards})
+                    </span>
+                  </span>
+                ) : (
+                  <span
+                    className={`text-xs font-black px-3 py-1.5 rounded-xl border flex items-center space-x-1.5 shadow-sm ${
+                      rules.forbiddenDealerBid
+                        ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                        : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                    }`}
+                  >
+                    <Scale className="w-4 h-4" />
+                    <span>
+                      Suma Exacta ({totalBids}/{cards}) {rules.forbiddenDealerBid ? '⚠️ Ilegal para repartidor' : '✓ Cuadrada'}
+                    </span>
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Visual Trick Progress Bar */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs font-bold text-slate-400">
+                <span className="flex items-center space-x-1.5">
+                  <span>Bazas Pedidas en Mesa:</span>
+                  <strong className="text-white text-sm">{totalBids}</strong>
+                  <span className="text-slate-500">/ {cards} {cards === 1 ? 'carta' : 'cartas'}</span>
+                </span>
+                <span
+                  className={
+                    isBidsOverCards
+                      ? 'text-purple-300 font-black flex items-center space-x-1 animate-pulse'
+                      : biddingAnalysis.bidsStatus === 'under'
+                      ? 'text-amber-300 font-extrabold'
+                      : 'text-emerald-300 font-extrabold'
+                  }
+                >
+                  {biddingAnalysis.bidsStatus === 'under' && `Faltan ${biddingAnalysis.differenceAbs} ${biddingAnalysis.differenceAbs === 1 ? 'baza' : 'bazas'}`}
+                  {isBidsOverCards && `⚠️ Exceso de +${biddingAnalysis.differenceAbs} ${biddingAnalysis.differenceAbs === 1 ? 'baza' : 'bazas'}`}
+                  {biddingAnalysis.bidsStatus === 'exact' && '100% Cartas cubiertas'}
+                </span>
+              </div>
+
+              <div className={`h-3 w-full bg-slate-900 rounded-full overflow-hidden p-0.5 border flex ${
+                isBidsOverCards ? 'border-purple-500/60 ring-1 ring-purple-500/40' : 'border-slate-800'
+              }`}>
+                <div
+                  className={`h-full rounded-full transition-all duration-300 ${
+                    biddingAnalysis.hasIndividualInvalidBids || (biddingAnalysis.bidsStatus === 'exact' && rules.forbiddenDealerBid)
+                      ? 'bg-gradient-to-r from-amber-500 to-rose-500'
+                      : isBidsOverCards
+                      ? 'bg-gradient-to-r from-amber-500 via-purple-500 to-rose-500 animate-pulse'
+                      : 'bg-gradient-to-r from-amber-500 to-emerald-400'
+                  }`}
+                  style={{
+                    width: `${Math.min(100, Math.max(8, cards > 0 ? (totalBids / cards) * 100 : 0))}%`,
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Tactical pocha alert */}
+            <div
+              className={`p-3.5 rounded-xl border text-xs flex items-start space-x-2.5 transition-all ${
+                biddingAnalysis.severity === 'error'
+                  ? 'bg-rose-950/40 border-rose-500/40 text-rose-200'
+                  : isBidsOverCards
+                  ? 'bg-purple-950/50 border-purple-500/60 text-purple-200 shadow-lg shadow-purple-950/40 ring-1 ring-purple-500/30'
+                  : biddingAnalysis.severity === 'warning'
+                  ? 'bg-amber-950/30 border-amber-500/30 text-amber-200'
+                  : 'bg-slate-900 border-slate-800 text-slate-300'
+              }`}
+            >
+              {biddingAnalysis.severity === 'error' ? (
+                <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+              ) : isBidsOverCards ? (
+                <AlertTriangle className="w-4 h-4 text-purple-400 shrink-0 mt-0.5 animate-bounce" />
+              ) : biddingAnalysis.bidsStatus === 'over' ? (
+                <Flame className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
+              ) : (
+                <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              )}
+              <div className="space-y-0.5 leading-relaxed">
+                <p className="font-bold text-white flex items-center gap-2">
+                  <span>{biddingAnalysis.statusMessage}</span>
+                  {isBidsOverCards && (
+                    <span className="text-[10px] uppercase font-black tracking-wider bg-purple-500/30 text-purple-200 border border-purple-400/50 px-1.5 py-0.5 rounded">
+                      Exceso de Subasta
+                    </span>
+                  )}
+                </p>
+                <p className="text-[11px] opacity-90">{biddingAnalysis.tacticalTip}</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Bidding or Actuals Input List (Ordered by Bidding Order starting from Mano) */}
         <div className="space-y-3">
@@ -763,35 +1193,66 @@ export const ActiveRound: React.FC<ActiveRoundProps> = ({
         </div>
 
         {/* Summary Footer & Validation Bar */}
-        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+        <div className={`p-4 rounded-xl border transition-all duration-300 space-y-3 ${
+          isBidsOverCards
+            ? 'bg-slate-950/95 border-purple-500/70 ring-2 ring-purple-500/30 shadow-lg shadow-purple-950/30'
+            : 'bg-slate-950 border-slate-800'
+        }`}>
           {isBiddingPhase ? (
             /* Bidding Validation */
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <span className="text-xs text-slate-400">
-                  Total Bazas Pedidas:{' '}
+              <div className="space-y-1.5">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="text-slate-400">Total Bazas Pedidas:</span>
                   <span
-                    className={`font-black text-sm ${
-                      totalBids === cards ? 'text-amber-400' : 'text-slate-200'
+                    className={`font-black px-2.5 py-1 rounded-lg text-xs transition-all ${
+                      biddingAnalysis.hasIndividualInvalidBids || isDealerForbiddenViolated
+                        ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                        : isBidsOverCards
+                        ? 'bg-purple-500/30 text-purple-200 border border-purple-400/80 ring-2 ring-purple-500/30 animate-pulse font-black shadow-sm'
+                        : biddingAnalysis.bidsStatus === 'under'
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                        : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                     }`}
                   >
-                    {totalBids} de {cards}
+                    {totalBids} de {cards} cartas ({biddingAnalysis.bidsStatus === 'under' ? `faltan ${biddingAnalysis.differenceAbs}` : isBidsOverCards ? `⚠️ +${biddingAnalysis.differenceAbs} de más (Exceso)` : 'igualadas'})
                   </span>
-                </span>
+                </div>
+
+                {isBidsOverCards && (
+                  <p className="text-xs text-purple-300 font-semibold flex items-center space-x-1 animate-pulse">
+                    <AlertTriangle className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                    <span>
+                      Total subastado (<strong>{totalBids}</strong>) &gt; Cartas de la mano (<strong>{cards}</strong>). Caerán {biddingAnalysis.differenceAbs} {biddingAnalysis.differenceAbs === 1 ? 'baza' : 'bazas'} de más.
+                    </span>
+                  </p>
+                )}
+
                 {rules.forbiddenDealerBid && forbiddenDealerBid !== null && (
-                  <p className="text-xs text-rose-400 font-medium mt-0.5">
-                    * El repartidor ({dealer.name}) no puede pedir{' '}
-                    <strong className="underline font-bold">{forbiddenDealerBid}</strong> para no
-                    empatar las {cards} cartas.
+                  <p className="text-xs text-rose-400 font-medium flex items-center space-x-1">
+                    <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                    <span>
+                      Repartidor ({dealer.name}): no puede pedir{' '}
+                      <strong className="underline font-bold">{forbiddenDealerBid}</strong> para no empatar las {cards} cartas.
+                    </span>
+                  </p>
+                )}
+
+                {biddingAnalysis.hasIndividualInvalidBids && (
+                  <p className="text-xs text-rose-400 font-bold flex items-center space-x-1">
+                    <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                    <span>Hay apuestas fuera del rango permitido (0 a {cards}).</span>
                   </p>
                 )}
               </div>
 
               <button
                 onClick={handleConfirmBids}
-                disabled={!allBidsEntered || isDealerForbiddenViolated}
+                disabled={!allBidsEntered || isDealerForbiddenViolated || biddingAnalysis.hasIndividualInvalidBids}
                 title={
-                  isDealerForbiddenViolated
+                  biddingAnalysis.hasIndividualInvalidBids
+                    ? `Hay apuestas mayores a ${cards} cartas`
+                    : isDealerForbiddenViolated
                     ? `El repartidor no puede pedir ${forbiddenDealerBid} bazas`
                     : !allBidsEntered
                     ? 'Introduce las bazas de todos los jugadores'

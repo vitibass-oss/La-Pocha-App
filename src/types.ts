@@ -48,6 +48,18 @@ export interface Round {
   subastadoWinnerId?: string;  // Player ID who won subastado and chose trump
 }
 
+export type ZeroBidRuleMode =
+  | 'standard'         // +10 pts al acertar 0 bazas (Regla estándar clásica)
+  | 'scaled_cards'     // Premiar por cartas: +10 base + 2 por carta repartida (mayor mérito a más cartas)
+  | 'reduced_penalty'  // Penalizar 0 fácil: +5 pts fijos por acertar 0 bazas
+  | 'bonus_reward'     // Superpremio a 0: +20 pts fijos por acertar 0 bazas
+  | 'custom_points';   // Puntuación fija personalizada
+
+export type ZeroBidFailPenalty =
+  | 'standard'        // -10 base - 5 por baza de más (Regla estándar)
+  | 'double_penalty'  // Castigo doble: -20 base - 10 por baza involuntaria
+  | 'harsh_20';       // Penalización severa: -20 base - 5 por baza
+
 export interface GameRules {
   forbiddenDealerBid: boolean; // Dealer cannot match total cards
   doubleOros: boolean;         // Oros scores double
@@ -58,6 +70,9 @@ export interface GameRules {
   singleMaxCardsRound?: boolean; // If true, plays exactly 1 single hand of max cards instead of a full round per player
   randomTrumpAfterSubastado?: boolean; // Enable max cards round with random trump drawn by dealer
   visibleTrumpAfterSubastado?: boolean; // Enable max cards round with visible trump after subastado
+  zeroBidRule?: ZeroBidRuleMode; // Modo de puntuación al acertar 0 bazas
+  zeroBidCustomPoints?: number;  // Puntos personalizados al acertar 0 bazas si se elige 'custom_points'
+  zeroBidFailPenalty?: ZeroBidFailPenalty; // Penalización al fallar apuesta de 0 bazas
 }
 
 export interface Game {
@@ -70,6 +85,23 @@ export interface Game {
   rules: GameRules;
   isFinished: boolean;
   name?: string;
+}
+
+export interface BiddingAnalysis {
+  cards: number;
+  totalBids: number;
+  remainingToMatchCards: number; // cards - totalBids (>0 means faltan bazas, <0 means sobran bazas, 0 means igualadas)
+  bidsStatus: 'under' | 'over' | 'exact'; // 'under': van de menos, 'over': van de más, 'exact': igualadas
+  differenceAbs: number; // |cards - totalBids|
+  allBidsEntered: boolean;
+  pendingPlayersCount: number;
+  maxPossibleBidsInRound: number; // cards * playersCount (theoretical maximum)
+  isDealerForbiddenViolated: boolean;
+  forbiddenDealerBid: number | null;
+  hasIndividualInvalidBids: boolean; // if any bid < 0 or bid > cards
+  statusMessage: string;
+  tacticalTip: string;
+  severity: 'info' | 'success' | 'warning' | 'error';
 }
 
 export interface PlayerStats {

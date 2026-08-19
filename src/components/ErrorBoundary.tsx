@@ -1,5 +1,6 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
-import { AlertTriangle, RotateCcw, Trash2 } from 'lucide-react';
+import { AlertTriangle, RotateCcw, Trash2, RefreshCw } from 'lucide-react';
+import { getSafeStorage } from '../utils/safeBoot';
 
 interface Props {
   children: ReactNode;
@@ -24,7 +25,7 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('Uncaught error in React ErrorBoundary:', error, errorInfo);
+    console.error('SafeBoot/Runtime error caught by ErrorBoundary:', error, errorInfo);
   }
 
   private handleReset = () => {
@@ -33,14 +34,15 @@ export class ErrorBoundary extends Component<Props, State> {
 
   private handleClearData = () => {
     try {
-      localStorage.clear();
+      const storage = getSafeStorage();
+      storage.clear();
       if ('caches' in window) {
         caches.keys().then((names) => {
           names.forEach((name) => caches.delete(name));
         });
       }
     } catch (e) {
-      console.error('Error clearing storage:', e);
+      console.error('Error clearing storage in ErrorBoundary:', e);
     }
     window.location.reload();
   };
@@ -57,7 +59,7 @@ export class ErrorBoundary extends Component<Props, State> {
             <div className="space-y-2">
               <h2 className="text-xl font-black text-white">¡Ups! Se ha producido un problema</h2>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Ocurrió un error inesperado al cargar la aplicación. Puedes reintentar o limpiar los datos guardados para restaurarla a su estado inicial.
+                Ocurrió un error inesperado al cargar la aplicación offline. Puedes reintentar o limpiar los datos guardados para restaurarla a su estado inicial seguro.
               </p>
             </div>
 

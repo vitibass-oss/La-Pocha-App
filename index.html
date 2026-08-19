@@ -14,22 +14,55 @@
     <title>Anotador de La Pocha (La Podrida)</title>
   </head>
   <body class="bg-slate-950 text-slate-100 antialiased">
-    <div id="root"></div>
+    <div id="root">
+      <div id="app-preloader" style="min-height: 100vh; background-color: #020617; color: #f8fafc; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: system-ui, -apple-system, sans-serif; text-align: center; padding: 24px;">
+        <div style="width: 64px; height: 64px; border-radius: 20px; background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.3); display: flex; align-items: center; justify-content: center; margin-bottom: 20px; font-size: 32px; box-shadow: 0 0 20px rgba(245,158,11,0.2);">
+          🎴
+        </div>
+        <div style="font-size: 22px; font-weight: 900; color: #f59e0b; margin-bottom: 8px; letter-spacing: -0.02em;">
+          Anotador de La Pocha
+        </div>
+        <div style="font-size: 13px; color: #94a3b8; max-width: 320px; line-height: 1.5; margin-bottom: 20px;">
+          Iniciando aplicación offline...
+        </div>
+        <div style="width: 48px; height: 4px; background: #1e293b; border-radius: 9999px; overflow: hidden; position: relative;">
+          <div style="width: 50%; height: 100%; background: #f59e0b; border-radius: 9999px; animation: loaderPulse 1.2s infinite ease-in-out;"></div>
+        </div>
+        <div id="offline-recovery-btn" style="display: none; margin-top: 24px;">
+          <button onclick="if('caches' in window){caches.keys().then(names=>Promise.all(names.map(n=>caches.delete(n))))};localStorage.clear();location.reload();" style="background:#f59e0b;color:#020617;font-weight:bold;font-size:12px;padding:10px 18px;border-radius:10px;border:none;cursor:pointer;">
+            Limpiar caché y recargar
+          </button>
+        </div>
+        <style>
+          @keyframes loaderPulse {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(200%); }
+          }
+        </style>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
     <script>
+      // Fallback timer: if React fails to mount within 5s, show recovery button
+      setTimeout(function() {
+        var btn = document.getElementById('offline-recovery-btn');
+        if (btn) btn.style.display = 'block';
+      }, 5000);
+
+      // Register Service Worker for 100% offline access across all devices
       if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          const isDevHost = location.hostname === 'localhost' || location.hostname.includes('run.app') || location.hostname.includes('stackblitz') || location.hostname.includes('webcontainer');
-          if (isDevHost) {
-            // Unregister SW in Cloud Run dev server to prevent caching dev proxy loading screens
-            navigator.serviceWorker.getRegistrations().then(regs => {
-              for (let reg of regs) reg.unregister();
+        window.addEventListener('load', function() {
+          navigator.serviceWorker.register('./sw.js')
+            .then(function(reg) {
+              console.log('SW offline registrado:', reg.scope);
+              // Check for updates periodically
+              if (reg.update) {
+                reg.update();
+              }
+            })
+            .catch(function(err) {
+              console.warn('SW fallo al registrar:', err);
             });
-          } else {
-            navigator.serviceWorker.register('./sw.js')
-              .then(reg => console.log('SW registrado con éxito:', reg.scope))
-              .catch(err => console.log('SW fallo al registrar:', err));
-          }
         });
       }
     </script>

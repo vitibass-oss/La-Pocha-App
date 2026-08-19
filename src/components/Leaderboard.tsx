@@ -6,12 +6,14 @@ interface LeaderboardProps {
   stats: PlayerStats[];
   currentRound?: Round;
   onOpenAddPlayerModal?: () => void;
+  onOpenReorderPlayersModal?: () => void;
 }
 
 export const Leaderboard: React.FC<LeaderboardProps> = ({
   stats,
   currentRound,
   onOpenAddPlayerModal,
+  onOpenReorderPlayersModal,
 }) => {
   const rankMedals = ['🥇', '🥈', '🥉'];
 
@@ -24,18 +26,24 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
           <h3 className="font-extrabold text-white text-base">Clasificación en Directo</h3>
         </div>
         <div className="flex items-center space-x-2">
+          {onOpenReorderPlayersModal && (
+            <button
+              onClick={onOpenReorderPlayersModal}
+              className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 font-bold px-2.5 py-1 rounded-lg transition cursor-pointer flex items-center space-x-1"
+              title="Cambiar orden físico de los jugadores en la mesa"
+            >
+              <span>🪑 Posición Mesa</span>
+            </button>
+          )}
           {onOpenAddPlayerModal && (
             <button
               onClick={onOpenAddPlayerModal}
               className="text-xs bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold px-2.5 py-1 rounded-lg transition cursor-pointer flex items-center space-x-1"
               title="Añadir un jugador a mitad de partida"
             >
-              <span>➕ Añadir Jugador</span>
+              <span>➕ Añadir</span>
             </button>
           )}
-          <span className="text-xs text-slate-400 font-medium">
-            {stats.length} Jugadores
-          </span>
         </div>
       </div>
 

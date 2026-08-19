@@ -1,12 +1,14 @@
 import React from 'react';
-import { HelpCircle, X, Shield, Award, CheckCircle2, AlertCircle } from 'lucide-react';
+import { HelpCircle, X, Shield, Award, Target, Flame, AlertCircle } from 'lucide-react';
+import { GameRules } from '../types';
 
 interface RulesModalProps {
   isOpen: boolean;
   onClose: () => void;
+  rules?: GameRules;
 }
 
-export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
+export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose, rules }) => {
   if (!isOpen) return null;
 
   return (
@@ -19,7 +21,7 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
             <div>
               <h3 className="font-extrabold text-lg leading-tight">Normas y Sistema de Puntuación</h3>
               <p className="text-xs font-semibold text-slate-900/80">
-                Reglamento Oficial de La Pocha (4 a 8 Jugadores)
+                Reglamento Oficial de La Pocha & Opciones Personalizadas
               </p>
             </div>
           </div>
@@ -46,7 +48,7 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
               </p>
               <ul className="list-disc list-inside space-y-1 text-slate-300 font-medium">
                 <li>
-                  <strong className="text-emerald-400">Si ACERTAS exactamente:</strong> +10 puntos por
+                  <strong className="text-emerald-400">Si ACIERTAS exactamente:</strong> +10 puntos por
                   acertar + 5 puntos por cada baza hecha.
                 </li>
                 <li>
@@ -57,11 +59,60 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
             </div>
           </section>
 
-          {/* Section 2: Regla de Pocha (Pedir todas las bazas en 4+ cartas) */}
+          {/* Section 2: Regla de Apuestas a Cero (Pedir 0 Bazas) */}
           <section className="space-y-3">
             <h4 className="font-extrabold text-amber-400 text-base flex items-center space-x-2">
-              <span>🔥</span>
-              <span>2. Regla de "Pocha" (Pedir todas las bazas en 4+ cartas)</span>
+              <Target className="w-5 h-5 text-amber-400" />
+              <span>2. Apuestas a Cero (Pedir 0 Bazas / Pocha a Cero)</span>
+            </h4>
+            <div className="bg-gradient-to-br from-slate-950 to-slate-900/90 border border-amber-500/30 p-4 rounded-xl space-y-3">
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Pedir cero bazas es una de las decisiones más tácticas de la Pocha. La aplicación permite elegir si quieres premiar el mérito de no llevarse bazas o penalizar el juego pasivo:
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                {/* Premio por acertar 0 */}
+                <div className="bg-slate-900 p-3 rounded-lg border border-emerald-500/30 space-y-1.5">
+                  <span className="font-black text-emerald-400 block flex items-center space-x-1">
+                    <span>✓ Al ACERTAR 0 Bazas:</span>
+                  </span>
+                  <ul className="space-y-1 text-slate-300">
+                    <li>• <strong>Estándar (+10 pts):</strong> 10 base + 5×0 = +10 pts (+20 en Oros).</li>
+                    <li>• <strong>Escalar por Dificultad (+10 + 2×cartas):</strong> En 8 cartas ganas +26 pts (muy difícil no llevarse nada con tantas cartas).</li>
+                    <li>• <strong>Penalizar Cero Fácil (+5 pts):</strong> Reduce la ganancia para desincentivar el juego conservador.</li>
+                    <li>• <strong>Superpremio (+20 pts):</strong> +20 puntos fijos.</li>
+                  </ul>
+                </div>
+
+                {/* Penalización por fallar 0 */}
+                <div className="bg-slate-900 p-3 rounded-lg border border-rose-500/30 space-y-1.5">
+                  <span className="font-black text-rose-400 block flex items-center space-x-1">
+                    <span>✗ Al FALLAR con 0 Bazas:</span>
+                  </span>
+                  <ul className="space-y-1 text-slate-300">
+                    <li>• <strong>Estándar (-10 - 5×baza):</strong> Resta 10 de base y 5 por cada baza involuntaria ganada.</li>
+                    <li>• <strong>Castigo Doble (-20 - 10×baza):</strong> Penalización duplicada por "comerse" bazas tras pedir cero.</li>
+                    <li>• <strong>Penalización Agravada (-20 - 5×baza):</strong> Base agravada de -20 puntos por fallar cero.</li>
+                  </ul>
+                </div>
+              </div>
+
+              {rules && (
+                <div className="bg-amber-500/10 border border-amber-500/20 p-2.5 rounded-lg text-xs flex items-center justify-between text-amber-200">
+                  <span className="font-bold">Regla activa en esta partida:</span>
+                  <span className="font-mono font-black">
+                    Acierto 0: {rules.zeroBidRule === 'scaled_cards' ? 'Escalar por Cartas (+10 + 2×cartas)' : rules.zeroBidRule === 'reduced_penalty' ? '+5 pts reducidos' : rules.zeroBidRule === 'bonus_reward' ? '+20 pts' : rules.zeroBidRule === 'custom_points' ? `+${rules.zeroBidCustomPoints ?? 10} pts` : '+10 pts (Estándar)'} | Fallo 0: {rules.zeroBidFailPenalty === 'double_penalty' ? 'Castigo Doble' : rules.zeroBidFailPenalty === 'harsh_20' ? 'Penalización Agravada' : 'Estándar'}
+                  </span>
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* Section 3: Regla de Pocha (Pedir todas las bazas en 4+ cartas) */}
+          <section className="space-y-3">
+            <h4 className="font-extrabold text-amber-400 text-base flex items-center space-x-2">
+              <Flame className="w-5 h-5 text-amber-400" />
+              <span>3. Regla de "Pocha" (Pedir todas las bazas en 4+ cartas)</span>
             </h4>
             <div className="bg-amber-500/10 border border-amber-500/30 p-4 rounded-xl space-y-3 text-amber-200">
               <p className="font-semibold text-xs leading-relaxed">
@@ -82,11 +133,11 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
             </div>
           </section>
 
-          {/* Section 3: Regla de Oros Doble */}
+          {/* Section 4: Regla de Oros Doble */}
           <section className="space-y-3">
             <h4 className="font-extrabold text-amber-300 text-base flex items-center space-x-2">
               <span>🪙</span>
-              <span>3. Puntuación Especial para Triunfo de Oros</span>
+              <span>4. Puntuación Especial para Triunfo de Oros</span>
             </h4>
             <div className="bg-amber-500/10 border border-amber-500/30 p-4 rounded-xl space-y-3 text-amber-200">
               <p className="font-semibold text-xs leading-relaxed">
@@ -114,11 +165,11 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
             </div>
           </section>
 
-          {/* Section 4: Prohibición del Repartidor */}
+          {/* Section 5: Prohibición del Repartidor */}
           <section className="space-y-3">
             <h4 className="font-extrabold text-slate-200 text-base flex items-center space-x-2">
               <Shield className="w-5 h-5 text-amber-400" />
-              <span>4. Regla del Repartidor (Prohibido Empatar)</span>
+              <span>5. Regla del Repartidor (Prohibido Empatar)</span>
             </h4>
             <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
               <p>
@@ -133,11 +184,11 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
             </div>
           </section>
 
-          {/* Section 5: Progresión de las Rondas y Subastado */}
+          {/* Section 6: Progresión de las Rondas y Subastado */}
           <section className="space-y-3">
             <h4 className="font-extrabold text-slate-200 text-base flex items-center space-x-2">
               <span>🃏</span>
-              <span>5. Estructura de la Partida y Subastado</span>
+              <span>6. Estructura de la Partida y Subastado</span>
             </h4>
             <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2 text-xs">
               <ol className="list-decimal list-inside space-y-1.5 font-medium">

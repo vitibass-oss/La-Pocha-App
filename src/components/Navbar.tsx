@@ -1,5 +1,15 @@
 import React from 'react';
-import { Trophy, BarChart3, RotateCcw, PlusCircle, HelpCircle, Download, FolderArchive } from 'lucide-react';
+import {
+  Trophy,
+  BarChart3,
+  RotateCcw,
+  PlusCircle,
+  HelpCircle,
+  Download,
+  FolderArchive,
+  CheckCircle2,
+  PlayCircle,
+} from 'lucide-react';
 
 interface NavbarProps {
   appName: string;
@@ -12,6 +22,8 @@ interface NavbarProps {
   isGameActive: boolean;
   currentRoundNum?: number;
   totalRoundsNum?: number;
+  completedRoundsNum?: number;
+  currentRoundCards?: number;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -25,9 +37,15 @@ export const Navbar: React.FC<NavbarProps> = ({
   isGameActive,
   currentRoundNum,
   totalRoundsNum,
+  completedRoundsNum = 0,
+  currentRoundCards,
 }) => {
+  const safeTotal = totalRoundsNum && totalRoundsNum > 0 ? totalRoundsNum : 0;
+  const progressPercent = safeTotal > 0 ? Math.round((completedRoundsNum / safeTotal) * 100) : 0;
+  const remainingRounds = Math.max(0, safeTotal - completedRoundsNum);
+
   return (
-    <header className="sticky top-0 z-30 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 text-white shadow-lg">
+    <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 text-white shadow-lg">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         {/* Brand & Logo */}
         <div className="flex items-center space-x-3">
@@ -117,6 +135,74 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Visual Game Progress Bar Strip beneath Navbar */}
+      {isGameActive && safeTotal > 0 && (
+        <div
+          id="game-progress-bar-container"
+          className="bg-slate-950/90 border-t border-slate-800/80 px-4 sm:px-6 lg:px-8 py-2 transition-all shadow-inner"
+        >
+          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 text-xs">
+            {/* Progress Counter */}
+            <div className="flex items-center flex-wrap gap-x-2 gap-y-1">
+              <div className="flex items-center space-x-1.5 font-medium text-slate-300">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span>
+                  Progreso:{' '}
+                  <strong className="text-white font-bold">{completedRoundsNum}</strong> de{' '}
+                  <strong className="text-amber-400 font-bold">{safeTotal}</strong> rondas completadas
+                </span>
+              </div>
+              <span className="text-slate-600 hidden sm:inline">•</span>
+              <span className="text-emerald-400 font-bold text-[11px] bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                {progressPercent}%
+              </span>
+            </div>
+
+            {/* Current Active Round & Remaining Info */}
+            <div className="flex items-center flex-wrap gap-x-2 gap-y-1 text-slate-400 text-[11px] sm:text-xs">
+              {completedRoundsNum >= safeTotal ? (
+                <span className="text-amber-300 font-bold flex items-center space-x-1">
+                  <span>🎉</span>
+                  <span>¡Partida completada!</span>
+                </span>
+              ) : (
+                <>
+                  {currentRoundNum && (
+                    <span className="flex items-center space-x-1">
+                      <PlayCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>
+                        En juego: <strong className="text-slate-200">Mano #{currentRoundNum}</strong>
+                        {currentRoundCards ? (
+                          <span className="text-slate-400 font-normal">
+                            {' '}({currentRoundCards} {currentRoundCards === 1 ? 'carta' : 'cartas'})
+                          </span>
+                        ) : null}
+                      </span>
+                    </span>
+                  )}
+                  <span className="text-slate-600 hidden sm:inline">•</span>
+                  <span>
+                    Restantes: <strong className="text-slate-300 font-semibold">{remainingRounds}</strong>
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Progress Bar Track */}
+          <div className="max-w-7xl mx-auto mt-1.5 h-2 w-full bg-slate-800/80 rounded-full overflow-hidden p-0.5 border border-slate-700/60">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-amber-500 via-amber-400 to-emerald-400 transition-all duration-500 ease-out shadow-[0_0_8px_rgba(245,158,11,0.5)]"
+              style={{ width: `${Math.min(100, Math.max(0, progressPercent))}%` }}
+              role="progressbar"
+              aria-valuenow={progressPercent}
+              aria-valuemin={0}
+              aria-valuemax={100}
+            />
+          </div>
+        </div>
+      )}
     </header>
   );
 };
